@@ -13,7 +13,7 @@ create table if not exists public.members (
 
 insert into public.members (email) values
   ('lbaker3012000@gmail.com'),
-  ('hcjobs@outlook.com')
+  ('hc.jobs@outlook.com')
 on conflict do nothing;
 
 alter table public.members enable row level security;
