@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261115f';
+import { db, DEMO } from './db.js?v=20261115i';
 
-const APP_VERSION = '15 Nov 2026';
+const APP_VERSION = '15 Nov 2026 (3)';
 
 // ======================================================================
 // State & helpers
@@ -13,7 +13,6 @@ const S = {
   data: null,
   loadedAt: 0,
   me: 'a',
-  jobTab: {},
   urls: {},
   filter: 'all',
   search: '',
@@ -79,7 +78,6 @@ const DEFAULTS = {
   email: 'info@cunninghamandbaker.co.uk',
   area: 'Covering East Sussex & Kent',
   website: 'cunninghamandbaker.co.uk',
-  default_split: 50,
   vat_registered: false, vat_number: '', vat_rate: 20,
   quote_valid_days: 30,
   quote_terms: 'This is a fixed price for the work described above. Any additional work requested will be agreed and quoted separately before it is carried out. Materials remain our property until paid for in full.',
@@ -225,7 +223,7 @@ function calc(job) {
   const balance = r2(gross - paid);
   const profit = price - totalCost;
   const margin = price ? profit / price : 0;
-  // Profit split is set once in Settings and applies to every job
+  // Profit is always split 50/50 between Henry and Luke
   const sa = ohSplit();
   const shareA = profit * sa;
   const shareB = profit - shareA;
@@ -347,7 +345,7 @@ function render() {
 }
 
 function after(r) {
-  if (r.view === 'job' && (S.jobTab[r.id] === 'photos')) loadPhotoUrls(r.id);
+  if (r.view === 'job') loadPhotoUrls(r.id);
   if (r.view === 'overheads') setTimeout(() => document.getElementById('overheads')?.scrollIntoView({ block: 'start' }), 0);
   if (r.view === 'calendar' && r.id && /^\d{4}-\d\d-\d\d$/.test(r.id)) {
     const el = document.getElementById(`d-${r.id}`);
@@ -543,14 +541,6 @@ function jobView({ id }) {
   const j = jobById(id);
   if (!j) return layout({ title: 'Not found', back: true, body: '<div class="empty">This job no longer exists.</div>' });
   const c = calc(j);
-  const tab = S.jobTab[id] || 'overview';
-  const tabs = [
-    ['overview', 'Overview'],
-    ['costs', `Costs${c.costs.length ? ` ${c.costs.length}` : ''}`],
-    ['pay', `Paid${c.pays.length ? ` ${c.pays.length}` : ''}`],
-    ['photos', `Photos${photosOf(id).length ? ` ${photosOf(id).length}` : ''}`],
-  ];
-  const panels = { overview: overviewTab, costs: costsTab, pay: payTab, photos: photosTab };
   const phone = String(j.customer_phone || '').replace(/[^\d+]/g, '');
   const addr = [j.address, j.postcode].filter(Boolean).join(', ');
   const body = `
@@ -563,8 +553,7 @@ function jobView({ id }) {
         ${addr ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener">${ICON.pin}<span>Directions</span></a>` : '<span class="off">' + ICON.pin + '<span>Directions</span></span>'}
       </div>
     </section>
-    <div class="seg tabs4">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="jobTab" data-id="${id}" data-tab="${k}">${l}</button>`).join('')}</div>
-    ${panels[tab](j, c)}`;
+    ${overviewTab(j, c)}`;
   return layout({
     title: `Job #${j.ref ?? ''}`, back: true, body,
     right: `<a class="btn small" href="#/edit/${id}">Edit</a>`,
@@ -587,11 +576,6 @@ function statusActions(j) {
 function overviewTab(j, c) {
   const quoted = j.status === 'quoted';
   const paidPct = c.gross > 0 ? Math.min(100, Math.max(0, (c.paid / c.gross) * 100)) : 0;
-  const settle = Math.abs(c.owedToA) < 0.01
-    ? '<div class="settle ok">All square between you.</div>'
-    : c.owedToA > 0
-      ? `<div class="settle">${esc(nameOf('b'))} owes ${esc(nameOf('a'))} <b>${money(c.owedToA)}</b></div>`
-      : `<div class="settle">${esc(nameOf('a'))} owes ${esc(nameOf('b'))} <b>${money(-c.owedToA)}</b></div>`;
   const others = (() => {
     const key = (j.customer_name || '').trim().toLowerCase();
     return key ? S.data.jobs.filter(o => o.id !== j.id && (o.customer_name || '').trim().toLowerCase() === key) : [];
@@ -613,25 +597,9 @@ function overviewTab(j, c) {
     <div class="row small paybar-label"><span>Paid ${money(c.paid)}</span><b class="${c.balance > 0.004 ? 'neg' : 'pos'}">${c.balance > 0.004 ? `${money(c.balance)} to collect` : c.balance < -0.004 ? `Overpaid ${money(-c.balance)}` : 'Paid in full'}</b></div>`}
   </section>
 
-  <section class="card">
-    <div class="row"><h3>Split ${Math.round(c.sa * 100)}/${Math.round((1 - c.sa) * 100)}</h3></div>
-    <div class="split2">
-      <div><span>${esc(nameOf('a'))}</span><b>${money0(c.costA + c.shareA)}</b><em>${money0(c.costA)} costs + ${money0(c.shareA)} profit</em></div>
-      <div><span>${esc(nameOf('b'))}</span><b>${money0(c.costB + c.shareB)}</b><em>${money0(c.costB)} costs + ${money0(c.shareB)} profit</em></div>
-    </div>
-    ${c.paid > 0 ? settle : ''}
-    <details class="more"><summary>Show breakdown</summary>
-      <table class="split">
-        <thead><tr><th></th><th>${esc(nameOf('a'))}</th><th>${esc(nameOf('b'))}</th></tr></thead>
-        <tbody>
-          <tr><td>Costs paid</td><td>${money(c.costA)}</td><td>${money(c.costB)}</td></tr>
-          <tr><td>Profit share</td><td>${money(c.shareA)}</td><td>${money(c.shareB)}</td></tr>
-          <tr class="b"><td>Total due</td><td>${money(c.costA + c.shareA)}</td><td>${money(c.costB + c.shareB)}</td></tr>
-          <tr><td>Received from customer</td><td>${money(c.paidA)}</td><td>${money(c.paidB)}</td></tr>
-        </tbody>
-      </table>
-    </details>
-  </section>
+  ${photosTab(j)}
+  ${costsTab(j, c)}
+  ${payTab(j, c)}
 
   <section class="card">
     <h3>Details</h3>
@@ -661,44 +629,48 @@ function costsTab(j, c) {
   c.costs.forEach(x => { byCat[x.category] = (byCat[x.category] || 0) + lineTotal(x); });
   const rows = c.costs.slice().sort((a, b) => String(b.cost_date || b.created_at).localeCompare(String(a.cost_date || a.created_at)));
   return `
-  <section class="card">
-    <div class="row"><h3>Costs</h3><b>${money(c.totalCost)}</b></div>
-    <div class="kv"><span>Paid by ${esc(nameOf('a'))}</span><b>${money(c.costA)}</b></div>
-    <div class="kv"><span>Paid by ${esc(nameOf('b'))}</span><b>${money(c.costB)}</b></div>
-    ${Object.keys(byCat).length ? `<div class="cat-bars">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
-      `<div class="cat"><span>${esc(COST_CATS[k] || k)}</span><i style="width:${c.totalCost ? Math.max(2, (v / c.totalCost) * 100) : 0}%"></i><b>${money(v)}</b></div>`).join('')}</div>` : ''}
+  <section class="card sec" id="j-costs">
+    <div class="row sec-head"><h3>Costs ${rows.length ? `<span class="count">${rows.length}</span>` : ''}</h3><b>${money(c.totalCost)}</b></div>
+    <div class="list">
+      ${rows.length ? rows.map(x => `
+        <button class="item" data-act="costSheet" data-job="${j.id}" data-id="${x.id}">
+          <div class="row"><strong>${esc(x.description)}</strong><b>${money(lineTotal(x))}</b></div>
+          <div class="row small muted"><span>${num(x.qty) !== 1 ? `${r2(num(x.qty))} × ${money(x.unit_cost)} · ` : ''}${esc(COST_CATS[x.category] || x.category)}${x.supplier ? ` · ${esc(x.supplier)}` : ''}</span>
+          <span><span class="who ${x.paid_by}">${esc(nameOf(x.paid_by))}</span>${x.cost_date ? ` ${fmtShort(x.cost_date)}` : ''}</span></div>
+        </button>`).join('') : '<p class="muted small sec-empty">No costs yet. Add materials as you buy them, or before quoting to work out the price.</p>'}
+    </div>
+    ${rows.length ? `<div class="sec-foot small">
+      <div class="kv"><span>Paid by ${esc(nameOf('a'))}</span><b>${money(c.costA)}</b></div>
+      <div class="kv"><span>Paid by ${esc(nameOf('b'))}</span><b>${money(c.costB)}</b></div>
+      ${Object.keys(byCat).length > 1 ? `<div class="cat-bars">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
+        `<div class="cat"><span>${esc(COST_CATS[k] || k)}</span><i style="width:${c.totalCost ? Math.max(2, (v / c.totalCost) * 100) : 0}%"></i><b>${money(v)}</b></div>`).join('')}</div>` : ''}
+    </div>` : ''}
     ${st.vat_registered ? '<p class="muted small">VAT registered: enter costs ex-VAT where you reclaim the VAT.</p>' : ''}
-  </section>
-  <button class="btn primary wide" data-act="costSheet" data-job="${j.id}">${ICON.plus} Add cost</button>
-  <div class="list">
-    ${rows.length ? rows.map(x => `
-      <button class="item" data-act="costSheet" data-job="${j.id}" data-id="${x.id}">
-        <div class="row"><strong>${esc(x.description)}</strong><b>${money(lineTotal(x))}</b></div>
-        <div class="row small muted"><span>${num(x.qty) !== 1 ? `${r2(num(x.qty))} × ${money(x.unit_cost)} · ` : ''}${esc(COST_CATS[x.category] || x.category)}${x.supplier ? ` · ${esc(x.supplier)}` : ''}</span>
-        <span><span class="who ${x.paid_by}">${esc(nameOf(x.paid_by))}</span>${x.cost_date ? ` ${fmtShort(x.cost_date)}` : ''}</span></div>
-      </button>`).join('') : '<div class="empty">No costs yet. Add materials as you buy them — or before quoting, to work out the price.</div>'}
-  </div>`;
+    <button class="btn primary wide" data-act="costSheet" data-job="${j.id}">${ICON.plus} Add cost</button>
+  </section>`;
 }
 
 function payTab(j, c) {
   const rows = c.pays.slice().sort((a, b) => String(b.pay_date || '').localeCompare(String(a.pay_date || '')));
   return `
-  <section class="card">
-    <div class="kv"><span>Job total${j.vat_applies ? ' (inc VAT)' : ''}</span><b>${money(c.gross)}</b></div>
-    <div class="kv"><span>Paid</span><b>${money(c.paid)}</b></div>
-    <div class="kv total"><span>${c.balance < -0.004 ? 'Overpaid' : 'Balance due'}</span><b class="${c.balance > 0.004 ? 'neg' : 'pos'}">${money(Math.abs(c.balance))}</b></div>
-  </section>
-  <div class="btn-row">
-    <button class="btn primary grow" data-act="paySheet" data-job="${j.id}">${ICON.plus} Add payment</button>
-    ${c.balance > 0.004 ? `<button class="btn grow" data-act="paidFull" data-id="${j.id}">Paid in full</button>` : ''}
-  </div>
-  <div class="list">
-    ${rows.length ? rows.map(x => `
-      <button class="item" data-act="paySheet" data-job="${j.id}" data-id="${x.id}">
-        <div class="row"><strong>${esc(PAY_KINDS[x.kind] || x.kind)}</strong><b>${money(x.amount)}</b></div>
-        <div class="row small muted"><span>${fmtDate(x.pay_date)} · ${esc(PAY_METHODS[x.method] || x.method || '')}${x.note ? ` · ${esc(x.note)}` : ''}</span><span class="who ${x.received_by}">${esc(nameOf(x.received_by))}</span></div>
-      </button>`).join('') : '<div class="empty">No payments yet.</div>'}
-  </div>`;
+  <section class="card sec" id="j-paid">
+    <div class="row sec-head"><h3>Payments ${rows.length ? `<span class="count">${rows.length}</span>` : ''}</h3><b>${money(c.paid)}</b></div>
+    <div class="list">
+      ${rows.length ? rows.map(x => `
+        <button class="item" data-act="paySheet" data-job="${j.id}" data-id="${x.id}">
+          <div class="row"><strong>${esc(PAY_KINDS[x.kind] || x.kind)}</strong><b>${money(x.amount)}</b></div>
+          <div class="row small muted"><span>${fmtDate(x.pay_date)} · ${esc(PAY_METHODS[x.method] || x.method || '')}${x.note ? ` · ${esc(x.note)}` : ''}</span><span class="who ${x.received_by}">${esc(nameOf(x.received_by))}</span></div>
+        </button>`).join('') : '<p class="muted small sec-empty">No payments yet.</p>'}
+    </div>
+    <div class="sec-foot">
+      <div class="kv"><span>Job total${j.vat_applies ? ' (inc VAT)' : ''}</span><b>${money(c.gross)}</b></div>
+      <div class="kv total"><span>${c.balance < -0.004 ? 'Overpaid' : 'Balance due'}</span><b class="${c.balance > 0.004 ? 'neg' : 'pos'}">${money(Math.abs(c.balance))}</b></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary grow" data-act="paySheet" data-job="${j.id}">${ICON.plus} Add payment</button>
+      ${c.balance > 0.004 ? `<button class="btn grow" data-act="paidFull" data-id="${j.id}">Paid in full</button>` : ''}
+    </div>
+  </section>`;
 }
 
 function photosTab(j) {
@@ -706,23 +678,27 @@ function photosTab(j) {
   const groups = {};
   ph.forEach(p => { (groups[p.kind || 'other'] ||= []).push(p); });
   const kind = S.photoKind?.[j.id] || (j.status === 'quoted' ? 'before' : j.status === 'finished' ? 'after' : 'during');
+  const many = Object.keys(groups).length > 1;
   return `
-  <section class="card ph-add-card">
-    <div class="small muted">Adding as:</div>
-    <div class="chips wrap ph-kinds">${Object.entries(PHOTO_KINDS).map(([k, l]) => `<button class="chip ${k === kind ? 'on' : ''}" data-act="photoKind" data-id="${j.id}" data-k="${k}">${l}</button>`).join('')}</div>
+  <section class="card sec" id="j-photos">
+    <div class="row sec-head"><h3>Photos ${ph.length ? `<span class="count">${ph.length}</span>` : ''}</h3></div>
+    ${ph.length ? Object.keys(PHOTO_KINDS).filter(k => groups[k]).map(k => `
+      ${many ? `<h4 class="group">${PHOTO_KINDS[k]}</h4>` : ''}
+      <div class="photos">${groups[k].map(p => `
+        <button class="thumb" data-act="viewPhoto" data-id="${p.id}">
+          ${S.urls[p.path] ? `<img src="${esc(S.urls[p.path])}" alt="${esc(p.caption || '')}" loading="lazy">` : '<span class="ph-load">…</span>'}
+          ${p.caption ? `<span class="cap">${esc(p.caption)}</span>` : ''}
+        </button>`).join('')}</div>`).join('') : ''}
+    <div class="ph-add-row">
+      <span class="small muted">Add as:</span>
+      <div class="chips wrap ph-kinds">${Object.entries(PHOTO_KINDS).map(([k, l]) => `<button class="chip ${k === kind ? 'on' : ''}" data-act="photoKind" data-id="${j.id}" data-k="${k}">${l}</button>`).join('')}</div>
+    </div>
     <div class="ph-add">
-      <label class="btn primary big ph-btn">${ICON.image}<span>Camera roll</span><input class="file-hidden" type="file" accept="image/*" multiple data-photo-job="${j.id}"></label>
-      <label class="btn big ph-btn">${ICON.camera}<span>Take photo</span><input class="file-hidden" type="file" accept="image/*" capture="environment" data-photo-job="${j.id}"></label>
+      <label class="btn primary ph-btn">${ICON.image}<span>Camera roll</span><input class="file-hidden" type="file" accept="image/*" multiple data-photo-job="${j.id}"></label>
+      <label class="btn ph-btn">${ICON.camera}<span>Take photo</span><input class="file-hidden" type="file" accept="image/*" capture="environment" data-photo-job="${j.id}"></label>
     </div>
     <div class="ph-status muted small" id="ph-status"></div>
-  </section>
-  ${ph.length ? Object.keys(PHOTO_KINDS).filter(k => groups[k]).map(k => `
-    <h3 class="group">${PHOTO_KINDS[k]}</h3>
-    <div class="photos">${groups[k].map(p => `
-      <button class="thumb" data-act="viewPhoto" data-id="${p.id}">
-        ${S.urls[p.path] ? `<img src="${esc(S.urls[p.path])}" alt="${esc(p.caption || '')}" loading="lazy">` : '<span class="ph-load">…</span>'}
-        ${p.caption ? `<span class="cap">${esc(p.caption)}</span>` : ''}
-      </button>`).join('')}</div>`).join('') : '<div class="empty">No photos yet — pick some from your camera roll or take one now.</div>'}`;
+  </section>`;
 }
 
 // Upload photos straight after they're picked
@@ -759,7 +735,7 @@ async function loadPhotoUrls(jobId) {
   try {
     Object.assign(S.urls, await db.fileUrls(need));
     const r = route();
-    if (r.view === 'job' && r.id === jobId && S.jobTab[jobId] === 'photos' && sheet.hidden) render();
+    if (r.view === 'job' && r.id === jobId && sheet.hidden) render();
   } catch (e) { console.error(e); }
 }
 
@@ -1823,7 +1799,6 @@ const FORMS = {
       ['vat_rate'].forEach(k => {
         data[k] = data[k] === '' || data[k] == null ? DEFAULTS[k] : num(data[k]);
       });
-      data.default_split = Math.min(100, Math.max(0, data.default_split));
       S.lastWrite = Date.now();
       await db.saveSettings(data);
       S.data.settings = data;
@@ -1842,7 +1817,6 @@ const ACT = {
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   async refresh(d, el) { await busy(el, async () => { await loadData(); S.urls = {}; render(); toast('Up to date'); }); },
   filter(d) { S.filter = d.f; render(); },
-  jobTab(d) { S.jobTab[d.id] = d.tab; render(); },
   calMonth(d) { S.calMonth = d.m; S.calDay = null; render(); },
   calDay(d) {
     S.calDay = d.d;
@@ -2200,11 +2174,6 @@ document.addEventListener('input', e => {
       f.category.value = it.category || f.category.value;
       if (out) out.textContent = `Last bought: ${money(it.unit_cost)}${it.supplier ? ` at ${it.supplier}` : ''}${it.cost_date ? ` on ${fmtDate(it.cost_date)}` : ''}`;
     } else if (out) out.textContent = '';
-  }
-  if (k === 'split') {
-    const a = Number(e.target.value);
-    const out = e.target.closest('form').querySelector('[data-out="split"]');
-    if (out) out.textContent = `${nameOf('a')} ${a}% / ${nameOf('b')} ${100 - a}%`;
   }
 });
 

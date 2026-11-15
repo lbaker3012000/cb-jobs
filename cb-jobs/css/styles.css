@@ -127,10 +127,6 @@ input[type=search] { width: 100%; }
 .chips.wrap .chip { padding: 6px 11px; font-size: .8rem; }
 .chip { flex: none; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 7px 14px; font: inherit; font-size: .85rem; color: var(--ink); cursor: pointer; }
 .chip.on { background: var(--green); color: #fff; border-color: var(--green); }
-.seg { display: flex; gap: 4px; overflow-x: auto; background: #e9e6df; padding: 4px; border-radius: 12px; margin: 10px 0 12px; scrollbar-width: none; }
-.seg::-webkit-scrollbar { display: none; }
-.seg button { flex: 1 0 auto; border: 0; background: transparent; padding: 8px 10px; border-radius: 9px; font: inherit; font-size: .85rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
-.seg button.on { background: #fff; color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 
 
 /* Buttons */
@@ -407,7 +403,6 @@ i.deadline { background: #fff; box-shadow: inset 0 0 0 2px var(--red); }
   background: var(--green); color: #fff; border: 0; border-radius: 14px; font: inherit; font-size: .85rem; font-weight: 600; text-decoration: none; cursor: pointer; }
 .quick svg { width: 22px; height: 22px; }
 .quick .off { background: #e3e0d9; color: #a19c92; cursor: default; }
-.seg.tabs4 button { flex: 1 1 0; padding: 9px 4px; }
 
 .big3 { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
 .big3 > div { display: flex; flex-direction: column; padding: 2px 4px; }
@@ -421,13 +416,6 @@ i.deadline { background: #fff; box-shadow: inset 0 0 0 2px var(--red); }
 .paybar i { display: block; height: 100%; background: var(--green-2); border-radius: 6px; }
 .paybar-label { margin-top: 6px; }
 
-.split2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.split2 > div { background: #f7f6f2; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; }
-.split2 span { font-size: .8rem; color: var(--muted); }
-.split2 b { font-size: 1.15rem; }
-.split2 em { font-style: normal; font-size: .72rem; color: var(--muted); margin-top: 2px; }
-details.more { margin-top: 10px; }
-details.more summary { color: var(--green); font-size: .88rem; cursor: pointer; }
 .kv b.addr { text-align: right; font-weight: 600; }
 .notes { background: #fffbe8; border-radius: 8px; padding: 8px; }
 
@@ -485,7 +473,7 @@ h1, h2, h3, h4, b, strong { font-weight: 600; }
 .doc-bank { background: var(--cream); }
 .doc-title h1, .doc-totals tr.tot td { color: var(--navy); }
 .doc-totals tr.tot td { border-bottom-color: var(--gold-deep); }
-.link-btn, details.more summary, a { color: var(--navy); }
+.link-btn, a { color: var(--navy); }
 .hint { color: var(--gold-deep); }
 .glance b { font-weight: 600; }
 .big3 b { font-weight: 600; }
@@ -572,10 +560,9 @@ i.event { background: #5f8796; }
 .demo-banner b { font-weight: 700; }
 
 /* ===== Photos: straight from camera roll / camera ===== */
-.ph-add-card { padding: 12px; }
 .ph-kinds { margin: 6px 0 10px; padding-bottom: 0; }
 .ph-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.ph-btn { flex-direction: column; min-height: 76px; gap: 4px; position: relative; overflow: hidden; }
+.ph-btn { gap: 8px; min-height: 48px; position: relative; overflow: hidden; }
 .ph-btn svg { width: 24px; height: 24px; }
 .btn.primary.ph-btn svg { stroke: var(--gold); }
 .ph-btn.busy { opacity: .55; pointer-events: none; }
@@ -597,3 +584,16 @@ html { background: var(--navy); }
 .splash .wordmark { font-size: 3.4rem; }
 .offline-banner { background: #3a2d14; color: #f6dfb6; font-size: .82rem; padding: 7px 14px; text-align: center; }
 .offline-banner b { color: #fff; }
+
+/* Job page: everything on one page */
+.sec .sec-head { margin-bottom: 4px; }
+.sec .sec-head h3 { margin: 0; }
+.sec .list { margin: 6px 0 10px; }
+.sec .item { box-shadow: none; border: 1px solid var(--line); }
+.sec-empty { margin: 6px 0 12px; }
+.sec-foot { border-top: 1px solid var(--line); padding-top: 8px; margin-bottom: 12px; }
+.sec .photos { margin: 8px 0 12px; }
+.sec h4.group { margin: 12px 0 6px; }
+.ph-add-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 8px; }
+.ph-add-row .chips { margin: 0; }
+.hero + .card { margin-top: 12px; }
