@@ -702,3 +702,11 @@ html[data-theme="dark"] .new-kind.active { background: #3b2d17; color: #e9bf7f; 
 .big3 > .price-cell + div { border-left: 1px solid var(--line); }
 .big3 .change { font-style: normal; font-size: .72rem; font-weight: 600; color: var(--gold-deep); margin-top: 2px; }
 html[data-theme="dark"] .big3 .change { color: var(--gold); }
+
+/* Who's doing it: Both / Henry only / Luke only */
+.field-label { font-size: .85rem; font-weight: 500; margin: 10px 0 6px; }
+.seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+.seg3 label { margin: 0; text-align: center; padding: 10px 4px; border: 1px solid var(--line); border-radius: 10px; font-size: .85rem; font-weight: 500; background: var(--card); cursor: pointer; }
+.seg3 label input { position: absolute; opacity: 0; pointer-events: none; }
+.seg3 label.on { background: var(--navy); border-color: var(--navy); color: var(--cream); }
+html[data-theme="dark"] .seg3 label.on { background: var(--gold); border-color: var(--gold); color: var(--navy); }

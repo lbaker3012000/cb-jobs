@@ -56,6 +56,7 @@ create table if not exists public.jobs (
   vat_applies boolean not null default false,
   vat_rate numeric(5,2) not null default 20,
   chased_at date,                           -- last time quote/invoice was chased
+  who text not null default 'both' check (who in ('both','a','b')), -- who did it: both = 50/50, a = Henry only, b = Luke only
   quote_date date,
   quote_valid_days int default 30,
   start_date date,
@@ -144,6 +145,9 @@ create table if not exists public.tasks (
   created_by text,
   created_at timestamptz not null default now()
 );
+
+-- Added later: safe to run on an existing database
+alter table public.jobs add column if not exists who text not null default 'both';
 
 -- General notes: anything that doesn't fit a job (codes, supplier info, ideas...)
 create table if not exists public.notes (

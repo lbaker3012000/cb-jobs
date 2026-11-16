@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261116c';
+import { db, DEMO } from './db.js?v=20261116d';
 
-const APP_VERSION = '16 Nov 2026 (3)';
+const APP_VERSION = '16 Nov 2026 (4)';
 
 // ======================================================================
 // State & helpers
@@ -229,8 +229,8 @@ function calc(job) {
   const balance = r2(gross - paid);
   const profit = price - totalCost;
   const margin = price ? profit / price : 0;
-  // Profit is always split 50/50 between Henry and Luke
-  const sa = ohSplit();
+  // Profit split: 50/50, or 100% to whoever did the job alone
+  const sa = jobShareA(job);
   const shareA = profit * sa;
   const shareB = profit - shareA;
   // Settle-up on money actually received (ex-VAT): each partner is owed
@@ -273,7 +273,9 @@ const ohAnnual = o => (o.frequency === 'oneoff' ? 0 : num(o.amount) * (OH_FREQ[o
 const ohLive = (o, on = today()) => o.frequency !== 'oneoff' && (!o.end_date || o.end_date >= on);
 // When we started counting a regular bill: its date or the day it was added, whichever is earlier
 const ohFrom = o => [o.start_date, String(o.created_at || '').slice(0, 10)].filter(Boolean).sort()[0] || today();
-const ohSplit = () => 0.5; // Henry & Luke always split 50/50
+const ohSplit = () => 0.5; // Henry & Luke always split overheads 50/50
+const jobShareA = j => (j.who === 'a' ? 1 : j.who === 'b' ? 0 : 0.5);
+const jobWhoLabel = j => (j.who === 'a' ? `${nameOf('a')} only` : j.who === 'b' ? `${nameOf('b')} only` : '');
 const ohPaidByA = (o, amt) => amt * (o.paid_by === 'a' ? 1 : o.paid_by === 'split' ? ohSplit() : 0);
 
 // Cost of one overhead falling between two dates (recurring ones pro-rata by day)
@@ -631,6 +633,7 @@ function overviewTab(j, c) {
     ${j.customer_phone ? `<div class="kv"><span>Phone</span><b>${esc(j.customer_phone)}</b></div>` : ''}
     ${j.customer_email ? `<div class="kv"><span>Email</span><b>${esc(j.customer_email)}</b></div>` : ''}
     ${j.status === 'quoted' && visitOf(j) ? `<div class="kv"><span>Quote visit</span><b>${fmtDate(visitOf(j).event_date)}${visitOf(j).start_time ? ` · ${fmtTime(visitOf(j).start_time)}` : ''}</b></div>` : ''}
+    ${jobWhoLabel(j) ? `<div class="kv"><span>Who did it</span><b>${esc(jobWhoLabel(j))} · 100% to them</b></div>` : ''}
     <div class="kv"><span>Quote #${j.ref ?? ''}</span><b>${j.quote_date ? `sent ${fmtDate(j.quote_date)}` : j.status === 'quoted' ? '<span class="muted">not sent yet</span>' : '—'}</b></div>
     ${j.finished_date ? `<div class="kv"><span>Finished</span><b>${fmtDate(j.finished_date)}</b></div>` : ''}
     ${j.description ? `<h4>Scope of works</h4><p>${nl2br(j.description)}</p>` : ''}
@@ -914,6 +917,9 @@ function editView({ id }) {
       <label>What's the job? <span class="muted small">(a few words)</span><input name="title" required value="${v('title')}" placeholder="e.g. Bathroom install" list="job-types" autocomplete="off"></label>
       <div class="chips wrap job-types">${JOB_TYPES.map(t => `<button type="button" class="chip ${j.title === t ? 'on' : ''}" data-act="jobType" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>
       <datalist id="job-types">${[...new Set(S.data.jobs.map(x => x.title).filter(Boolean))].filter(t => !JOB_TYPES.includes(t)).slice(0, 50).map(t => `<option value="${esc(t)}">`).join('')}</datalist>
+      <div class="field-label">Who's doing it?</div>
+      <div class="seg3">${[['both', 'Both · 50/50'], ['a', `${nameOf('a')} only`], ['b', `${nameOf('b')} only`]].map(([k, l]) =>
+        `<label class="${(j.who || 'both') === k ? 'on' : ''}"><input type="radio" name="who" value="${k}" ${(j.who || 'both') === k ? 'checked' : ''} data-input="segpick">${l}</label>`).join('')}</div>
       ${isNew ? `<input type="hidden" name="status" value="${j.status}">` : `<label>Status<select name="status">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${j.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`}
     </section>
     <section class="card">
@@ -1789,6 +1795,7 @@ const FORMS = {
         quote_valid_days: fd.get('quote_valid_days') === '' ? null : Math.round(num(fd.get('quote_valid_days'))),
         start_date: nz(fd.get('start_date')),
         end_date: nz(fd.get('end_date')),
+        who: fd.get('who') || 'both',
       };
       // Quote visit -> calendar entry linked to the job
       const syncVisit = async jobId => {
@@ -2336,6 +2343,7 @@ document.addEventListener('input', e => {
   const k = e.target.dataset?.input;
   if (!k) return;
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
+  if (k === 'segpick') { e.target.closest('.seg3').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target))); }
   if (k === 'noteSearch') { S.noteSearch = e.target.value; document.getElementById('notes-list').innerHTML = notesListHtml(); }
   if (k === 'archiveSearch') { S.archiveSearch = e.target.value; document.getElementById('archive-list').innerHTML = archiveListHtml(); }
   if (k === 'customer') {
