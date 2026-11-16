@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261116b';
+import { db, DEMO } from './db.js?v=20261116c';
 
-const APP_VERSION = '16 Nov 2026 (2)';
+const APP_VERSION = '16 Nov 2026 (3)';
 
 // ======================================================================
 // State & helpers
@@ -610,7 +610,7 @@ function overviewTab(j, c) {
 
   <section class="card">
     <div class="big3">
-      <div><span>Price</span><b>${money0(c.gross)}</b>${j.vat_applies ? '<em>inc VAT</em>' : ''}</div>
+      <button class="price-cell" data-act="priceSheet" data-id="${j.id}"><span>Price</span><b>${money0(c.gross)}</b>${j.vat_applies ? '<em>inc VAT</em>' : ''}<em class="change">✎ Change</em></button>
       <div><span>Costs</span><b>${money0(c.totalCost)}</b></div>
       <div><span>${quoted ? 'Est. profit' : 'Profit'}</span><b class="${c.profit < 0 ? 'neg' : 'pos'}">${money0(c.profit)}</b><em>${pct(c.margin)}</em></div>
     </div>
@@ -826,6 +826,20 @@ function notesListHtml() {
     </button>`).join('')
     : q ? '<div class="empty">No notes match that.</div>'
     : `<div class="empty">Somewhere for anything that doesn't fit a job — key safe codes, supplier account numbers, sizes, ideas, things to buy for the van.<br><br>The first line of a note is its title. Pin the important ones to the top.</div>`}`;
+}
+
+function priceSheet(id) {
+  const j = jobById(id);
+  if (!j) return;
+  const st = set();
+  openSheet(`<form data-form="price" class="form">
+    ${sheetHead('Change price')}
+    <input type="hidden" name="id" value="${j.id}">
+    <p class="muted small">${esc(jobName(j))} · currently <b>${money(num(j.price))}</b>${j.vat_applies ? ' + VAT' : ''}</p>
+    <label>New price${j.vat_applies || st.vat_registered ? ' (ex VAT)' : ''} £<input name="price" type="number" inputmode="decimal" step="0.01" min="0" value="${esc(j.price ?? '')}" required></label>
+    <button class="btn primary wide big">Save new price</button>
+  </form>`);
+  setTimeout(() => { const i = sheet.querySelector('[name=price]'); i?.focus(); i?.select(); }, 60);
 }
 
 function noteSheet(id) {
@@ -1901,6 +1915,17 @@ const FORMS = {
     });
   },
 
+  async price(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      const v = fd.get('price');
+      if (v === '' || num(v) < 0) throw new Error('Enter the new price');
+      const j = jobById(fd.get('id'));
+      const price = r2(num(v));
+      if (num(j.price) !== price) await saveRow('jobs', j.id, { price });
+      closeSheet(); render(); toast(`Price changed to ${money(price)}`);
+    });
+  },
+
   async note(fd, form) {
     await busy(form.querySelector('button.primary'), async () => {
       const text = (fd.get('text') || '').replace(/\s+$/, '');
@@ -1958,6 +1983,7 @@ const ACT = {
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   noteSheet(d) { noteSheet(d.id); },
+  priceSheet(d) { priceSheet(d.id); },
   swapKind(d, el) {
     const f = el.closest('form');
     if (f) S.newDraft = Object.fromEntries(new FormData(f));

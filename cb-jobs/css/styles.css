@@ -695,3 +695,10 @@ html[data-theme="dark"] .new-kind.active { background: #3b2d17; color: #e9bf7f; 
 .note-card.pinned { border-left: 4px solid var(--gold); }
 .note-edit textarea { min-height: 45vh; font-size: 1rem; line-height: 1.45; }
 .pin-chip { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Tap the price to change it */
+.big3 > .price-cell { display: flex; flex-direction: column; align-items: center; padding: 2px 4px; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 10px; }
+.big3 > .price-cell:active { background: var(--green-soft); }
+.big3 > .price-cell + div { border-left: 1px solid var(--line); }
+.big3 .change { font-style: normal; font-size: .72rem; font-weight: 600; color: var(--gold-deep); margin-top: 2px; }
+html[data-theme="dark"] .big3 .change { color: var(--gold); }
