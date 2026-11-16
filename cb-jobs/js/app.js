@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261115i';
+import { db, DEMO } from './db.js?v=20261116a';
 
-const APP_VERSION = '15 Nov 2026 (3)';
+const APP_VERSION = '16 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -96,6 +96,9 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>',
+  sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+  note: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>',
   jobs: '<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
   cal: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   archive: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg>',
@@ -180,8 +183,11 @@ function todos() {
   const add = (j, pri, icon, text, sub, tpl, extra = '') => out.push({ j, pri, icon, text, sub, tpl, extra });
   for (const j of S.data.jobs) {
     const c = calc(j);
-    if (j.status === 'quoted') {
-      const sent = j.quote_date || String(j.created_at || '').slice(0, 10);
+    if (j.status === 'quoted' && !j.quote_date) {
+      const vis = visitOf(j);
+      if (!vis || vis.event_date < t) add(j, 3, '✉', 'Quote to send', vis ? `Visited ${fmtShort(vis.event_date)} — price it up and send it` : 'Price it up, then Send PDF', null, `<a class="btn small" href="#/doc/${j.id}/quote">Quote</a>`);
+    } else if (j.status === 'quoted') {
+      const sent = j.quote_date;
       const chased = getMark(j, 'chased_at');
       const last = chased && chased > sent ? chased : sent;
       const valid = j.quote_valid_days && sent ? addDays(sent, num(j.quote_valid_days)) : null;
@@ -336,7 +342,7 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView,
+    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView,
   };
   const v = (views[r.view] || jobsView)(r);
   app.innerHTML = v;
@@ -360,7 +366,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   <header class="top">
     ${back ? `<button class="icon-btn" data-act="back" aria-label="Back">${ICON.back}</button>` : '<div class="brand"><img class="brand-mark" src="img/house-gold.png" alt=""><span class="wordmark">C<i>&amp;</i>B</span></div>'}
     <h1>${esc(title)}</h1>
-    <div class="top-right">${right}</div>
+    <div class="top-right">${right}${themeSwitch()}</div>
   </header>
   ${S.offlineSince ? `<div class="offline-banner"><b>No signal</b> — showing jobs as of ${new Date(S.offlineSince).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}. You can look, but changes can't be saved until you're back online.</div>` : ''}
   ${DEMO ? '<div class="demo-banner"><b>Demo</b> — sample jobs to try out. Changes stay on this phone only.</div>' : ''}
@@ -369,11 +375,16 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   ${nav ? `<nav class="tabs">
     ${tab('jobs', 'Jobs', ICON.jobs)}
     ${tab('calendar', 'Calendar', ICON.cal)}
+    ${tab('notes', 'Notes', ICON.note)}
     ${tab('archive', 'Archive', ICON.archive)}
     ${tab('money', 'Money', ICON.money)}
     ${tab('settings', 'Settings', ICON.cog)}
   </nav>` : ''}`;
 }
+
+// Dark mode: remembered on each phone
+const isDark = () => document.documentElement.dataset.theme === 'dark';
+const themeSwitch = () => `<button class="theme-switch" data-act="toggleTheme" role="switch" aria-checked="${isDark()}" aria-label="Dark mode"><i>${isDark() ? ICON.moon : ICON.sun}</i></button>`;
 
 const refreshBtn = `<button class="icon-btn" data-act="refresh" aria-label="Refresh">${ICON.refresh}</button>`;
 const pill = s => `<span class="pill ${s}">${STATUS[s] || s}</span>`;
@@ -519,11 +530,23 @@ function jobListHtml() {
   return list.map(jobCard).join('');
 }
 
+// The site visit to price up a quote: the job's next calendar "visit" entry
+function visitOf(j) {
+  return (S.data.events || []).filter(e => e.job_id === j.id && e.kind === 'visit' && !e.done)
+    .sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))[0] || null;
+}
+const fmtTime = t => (t ? String(t).slice(0, 5) : '');
+
 function jobCard(j) {
   const c = calc(j);
   const dates = j.start_date ? `${fmtShort(j.start_date)}${j.end_date && j.end_date !== j.start_date ? ` – ${fmtShort(j.end_date)}` : ''}` : '';
   let line = '';
-  if (j.status === 'quoted') line = `<b>${money0(c.gross)}</b> quote${j.quote_date ? ` · sent ${fmtShort(j.quote_date)}` : ''}`;
+  if (j.status === 'quoted') {
+    const vis = visitOf(j);
+    line = j.quote_date ? `<b>${money0(c.gross)}</b> quote · sent ${fmtShort(j.quote_date)}`
+      : vis && vis.event_date >= today() ? `<b>Visit ${fmtShort(vis.event_date)}${vis.start_time ? ` ${fmtTime(vis.start_time)}` : ''}</b> · to price up`
+      : `<b class="neg">Quote not sent yet</b>${c.gross ? ` · ${money0(c.gross)}` : ''}`;
+  }
   else if (j.status === 'active') line = `${dates ? `<b>${dates}</b> · ` : '<b class="neg">No dates</b> · '}${c.balance > 0.004 ? `${money0(c.balance)} to collect` : 'paid'}`;
   else if (j.status === 'finished') line = c.balance > 0.004 ? `<b class="neg">Owed ${money(c.balance)}</b>` : `Paid · profit <b class="${c.profit < 0 ? 'neg' : 'pos'}">${money0(c.profit)}</b>`;
   else line = `Declined · ${money0(c.gross)}`;
@@ -607,7 +630,8 @@ function overviewTab(j, c) {
     ${j.address ? `<div class="kv"><span>Address</span><b class="addr">${nl2br([j.address, j.postcode].filter(Boolean).join(', '))}</b></div>` : ''}
     ${j.customer_phone ? `<div class="kv"><span>Phone</span><b>${esc(j.customer_phone)}</b></div>` : ''}
     ${j.customer_email ? `<div class="kv"><span>Email</span><b>${esc(j.customer_email)}</b></div>` : ''}
-    <div class="kv"><span>Quote</span><b>#${j.ref ?? ''}${j.quote_date ? ` · ${fmtDate(j.quote_date)}` : ''}</b></div>
+    ${j.status === 'quoted' && visitOf(j) ? `<div class="kv"><span>Quote visit</span><b>${fmtDate(visitOf(j).event_date)}${visitOf(j).start_time ? ` · ${fmtTime(visitOf(j).start_time)}` : ''}</b></div>` : ''}
+    <div class="kv"><span>Quote #${j.ref ?? ''}</span><b>${j.quote_date ? `sent ${fmtDate(j.quote_date)}` : j.status === 'quoted' ? '<span class="muted">not sent yet</span>' : '—'}</b></div>
     ${j.finished_date ? `<div class="kv"><span>Finished</span><b>${fmtDate(j.finished_date)}</b></div>` : ''}
     ${j.description ? `<h4>Scope of works</h4><p>${nl2br(j.description)}</p>` : ''}
     ${j.notes ? `<h4>Notes (just you two)</h4><p class="notes">${nl2br(j.notes)}</p>` : ''}
@@ -762,25 +786,121 @@ function pastItems() {
   return [...seen.values()];
 }
 
+// Switching between "New quote" and "New job" keeps what's been typed
+function takeDraft() {
+  const d = S.newDraft || {};
+  S.newDraft = null;
+  const keep = ['address', 'postcode', 'title', 'customer_name', 'customer_phone', 'customer_email', 'price', 'description', 'notes', 'start_date', 'end_date'];
+  return Object.fromEntries(keep.filter(k => d[k]).map(k => [k, d[k]]));
+}
+
+// ======================================================================
+// Notes: anything that doesn't fit a job
+// ======================================================================
+const noteTitle = n => String(n.text || '').trim().split('\n')[0].slice(0, 80) || 'Untitled';
+const noteRest = n => String(n.text || '').trim().split('\n').slice(1).join('\n').trim();
+const sortNotes = list => list.slice().sort((a, b) => (b.pinned - a.pinned) || String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+
+function notesView() {
+  if (S.data.notesMissing) {
+    return layout({ title: 'Notes', body: `<section class="card"><h3>One quick database update needed</h3>
+      <p>Notes need a new table in Supabase. Open the <b>SQL Editor</b> in Supabase, paste in <code>supabase/schema.sql</code> and press <b>Run</b> (it's safe to run again and doesn't touch your jobs). Then refresh.</p></section>` });
+  }
+  const all = S.data.notes || [];
+  const body = `
+  <button class="btn primary wide big" data-act="noteSheet">${ICON.plus} New note</button>
+  ${all.length > 5 ? `<input class="search" type="search" placeholder="Search notes" value="${esc(S.noteSearch || '')}" data-input="noteSearch" style="margin-top:12px">` : ''}
+  <div id="notes-list" style="margin-top:12px">${notesListHtml()}</div>`;
+  return layout({ title: 'Notes', right: refreshBtn, body });
+}
+
+function notesListHtml() {
+  const q = (S.noteSearch || '').toLowerCase();
+  const all = sortNotes(S.data.notes || []);
+  const list = q ? all.filter(n => String(n.text || '').toLowerCase().includes(q)) : all;
+  return `${list.length ? list.map(n => `
+    <button class="card note-card ${n.pinned ? 'pinned' : ''}" data-act="noteSheet" data-id="${n.id}">
+      <span class="note-title">${n.pinned ? '📌 ' : ''}${esc(noteTitle(n))}</span>
+      ${noteRest(n) ? `<span class="note-body">${esc(noteRest(n))}</span>` : ''}
+      <span class="note-meta">${n.updated_by ? `${esc(n.updated_by)} · ` : ''}${fmtShort(String(n.updated_at || n.created_at).slice(0, 10))}</span>
+    </button>`).join('')
+    : q ? '<div class="empty">No notes match that.</div>'
+    : `<div class="empty">Somewhere for anything that doesn't fit a job — key safe codes, supplier account numbers, sizes, ideas, things to buy for the van.<br><br>The first line of a note is its title. Pin the important ones to the top.</div>`}`;
+}
+
+function noteSheet(id) {
+  if (S.data.notesMissing) { toast('Notes need the database set up: run supabase/schema.sql in Supabase', true); return; }
+  const n = id ? (S.data.notes || []).find(x => x.id === id) : { text: '', pinned: false };
+  if (!n) return;
+  openSheet(`<form data-form="note" class="form note-edit">
+    ${sheetHead(id ? 'Note' : 'New note', id, 'notes')}
+    <input type="hidden" name="id" value="${id || ''}">
+    <textarea name="text" required placeholder="First line is the title&#10;&#10;Then anything you like…">${esc(n.text || '')}</textarea>
+    <label class="check"><input type="checkbox" name="pinned" ${n.pinned ? 'checked' : ''}> Pin to the top</label>
+    ${id ? `<p class="muted small">Last changed${n.updated_by ? ` by ${esc(n.updated_by)}` : ''} ${fmtDate(String(n.updated_at || n.created_at).slice(0, 10))}</p>` : ''}
+    <button class="btn primary wide big">Save</button>
+  </form>`);
+  if (!id) setTimeout(() => sheet.querySelector('[name=text]')?.focus(), 60);
+}
+
+function newChoiceView() {
+  const body = `
+  <p class="muted choose-lead">What are you adding?</p>
+  <a class="card choose" href="#/edit/new-quote">
+    <span class="choose-icon">${ICON.doc}</span>
+    <span><strong>A quote</strong><em>Need to price it up first — maybe visit to have a look</em></span>
+  </a>
+  <a class="card choose" href="#/edit/new-job">
+    <span class="choose-icon">${ICON.jobs}</span>
+    <span><strong>A job</strong><em>Price agreed — the work is going ahead</em></span>
+  </a>`;
+  return layout({ title: 'New', back: true, body, nav: false });
+}
+
 function editView({ id }) {
-  const isNew = id === 'new';
+  if (id === 'new') return newChoiceView();
+  const isNew = id === 'new-quote' || id === 'new-job';
   const st = set();
   const j = isNew
-    ? { status: 'quoted', price: '', vat_applies: !!st.vat_registered, vat_rate: st.vat_rate, quote_date: today(), quote_valid_days: st.quote_valid_days }
+    ? { status: id === 'new-job' ? 'active' : 'quoted', price: '', vat_applies: !!st.vat_registered, vat_rate: st.vat_rate, quote_date: null, quote_valid_days: st.quote_valid_days, ...takeDraft() }
     : jobById(id);
   if (!j) return layout({ title: 'Not found', back: true, body: '<div class="empty">Job not found.</div>' });
   const v = k => esc(j[k] ?? '');
+  const quote = j.status === 'quoted';
+  const vis = !isNew && quote ? visitOf(j) : null;
+  const visitCard = `
+    <section class="card">
+      <h3>Quote visit</h3>
+      <p class="muted small">Going round to look and price it up? Put it in and it goes on the calendar. Leave blank if you're quoting without visiting.</p>
+      <div class="two">
+        <label>Visit date<input name="visit_date" type="date" value="${esc(vis?.event_date || '')}"></label>
+        <label>Time<input name="visit_time" type="time" value="${esc(fmtTime(vis?.start_time))}"></label>
+      </div>
+      <input type="hidden" name="visit_id" value="${esc(vis?.id || '')}">
+    </section>`;
+  const quoteSent = `
+      <div class="two">
+        <label>Date quote sent<input name="quote_date" type="date" value="${v('quote_date')}"></label>
+        <label>Quote valid (days)<input name="quote_valid_days" type="number" min="0" value="${v('quote_valid_days')}"></label>
+      </div>
+      ${quote && !j.quote_date ? '<p class="muted small">Leave blank until it\'s sent — tapping <b>Send PDF</b> on the quote fills this in for you.</p>' : ''}`;
+  const workDates = `
+      <div class="two">
+        <label>Job start<input name="start_date" type="date" value="${v('start_date')}"></label>
+        <label>Job end<input name="end_date" type="date" value="${v('end_date')}"></label>
+      </div>`;
   const body = `
   <form data-form="job" class="form">
     <input type="hidden" name="id" value="${isNew ? '' : esc(j.id)}">
+    ${isNew ? `<div class="new-kind ${quote ? 'quoted' : 'active'}">${quote ? 'New quote' : 'New job'} <a href="#/edit/${quote ? 'new-job' : 'new-quote'}" data-act="swapKind">Change to ${quote ? 'job' : 'quote'}</a></div>` : ''}
     <section class="card">
-      <h3>Job</h3>
+      <h3>${quote ? 'What and where' : 'Job'}</h3>
       <label>Job address <span class="muted small">(this is the job's name)</span><textarea name="address" rows="2" autocapitalize="words" placeholder="e.g. 14 Sea Road, Bexhill-on-Sea">${v('address')}</textarea></label>
       <label>Postcode<input name="postcode" value="${v('postcode')}" autocapitalize="characters"></label>
       <label>What's the job? <span class="muted small">(a few words)</span><input name="title" required value="${v('title')}" placeholder="e.g. Bathroom install" list="job-types" autocomplete="off"></label>
       <div class="chips wrap job-types">${JOB_TYPES.map(t => `<button type="button" class="chip ${j.title === t ? 'on' : ''}" data-act="jobType" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>
       <datalist id="job-types">${[...new Set(S.data.jobs.map(x => x.title).filter(Boolean))].filter(t => !JOB_TYPES.includes(t)).slice(0, 50).map(t => `<option value="${esc(t)}">`).join('')}</datalist>
-      <label>Status<select name="status">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${j.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${isNew ? `<input type="hidden" name="status" value="${j.status}">` : `<label>Status<select name="status">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${j.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`}
     </section>
     <section class="card">
       <h3>Customer</h3>
@@ -791,33 +911,28 @@ function editView({ id }) {
         <label>Email<input name="customer_email" type="email" value="${v('customer_email')}"></label>
       </div>
     </section>
+    ${quote ? visitCard : ''}
     <section class="card">
       <h3>Price</h3>
+      ${quote && isNew ? '<p class="muted small">Don\'t know yet? Leave it — fill it in after the visit.</p>' : ''}
       <label>Fixed price${st.vat_registered ? ' (ex VAT)' : ''} £<input name="price" type="number" inputmode="decimal" step="0.01" min="0" value="${v('price')}" placeholder="0"></label>
       ${st.vat_registered || j.vat_applies ? `
       <div class="two">
         <label class="check"><input type="checkbox" name="vat_applies" ${j.vat_applies ? 'checked' : ''}> Add VAT</label>
         <label>VAT rate %<input name="vat_rate" type="number" step="0.1" value="${v('vat_rate')}"></label>
       </div>` : `<input type="hidden" name="vat_rate" value="${v('vat_rate')}">`}
-
     </section>
     <section class="card">
-      <h3>Dates</h3>
-      <div class="two">
-        <label>Quote date<input name="quote_date" type="date" value="${v('quote_date')}"></label>
-        <label>Quote valid (days)<input name="quote_valid_days" type="number" min="0" value="${v('quote_valid_days')}"></label>
-        <label>Start<input name="start_date" type="date" value="${v('start_date')}"></label>
-        <label>End<input name="end_date" type="date" value="${v('end_date')}"></label>
-      </div>
-
+      ${quote ? `<h3>Sending the quote</h3>${quoteSent}${isNew ? '' : `<h4>If it goes ahead</h4>${workDates}`}`
+        : `<h3>Dates</h3>${workDates}${isNew ? `<input type="hidden" name="quote_valid_days" value="${v('quote_valid_days')}">` : `<h4>Quote</h4>${quoteSent}`}`}
     </section>
     <section class="card">
       <label>Scope of works <span class="muted small">(shown on quote & invoice)</span><textarea name="description" rows="5">${v('description')}</textarea></label>
       <label>Internal notes <span class="muted small">(only you two see these)</span><textarea name="notes" rows="3">${v('notes')}</textarea></label>
     </section>
-    <button class="btn primary wide big">${isNew ? 'Create job' : 'Save changes'}</button>
+    <button class="btn primary wide big">${isNew ? (quote ? 'Save quote' : 'Create job') : 'Save changes'}</button>
   </form>`;
-  return layout({ title: isNew ? 'New job' : 'Edit job', back: true, body, nav: false });
+  return layout({ title: isNew ? (quote ? 'New quote' : 'New job') : 'Edit', back: true, body, nav: false });
 }
 
 // ======================================================================
@@ -847,8 +962,8 @@ function deadlinesIn(from, to) {
     (map[iso] ||= []).push(d);
   };
   for (const j of S.data.jobs) {
-    if (j.status === 'quoted') {
-      const sent = j.quote_date || String(j.created_at || '').slice(0, 10);
+    if (j.status === 'quoted' && j.quote_date) {
+      const sent = j.quote_date;
       const valid = j.quote_valid_days && sent ? addDays(sent, num(j.quote_valid_days)) : null;
       if (valid && valid >= t) put(valid, { cls: 'warn', label: 'Quote expires', sub: jobName(j), href: `#/job/${j.id}` });
     }
@@ -1654,10 +1769,20 @@ const FORMS = {
         price: r2(num(fd.get('price'))),
         vat_applies: fd.get('vat_applies') === 'on',
         vat_rate: num(fd.get('vat_rate')) || num(set().vat_rate) || 20,
-        quote_date: nz(fd.get('quote_date')),
+        quote_date: fd.has('quote_date') ? nz(fd.get('quote_date')) : (old?.quote_date ?? null),
         quote_valid_days: fd.get('quote_valid_days') === '' ? null : Math.round(num(fd.get('quote_valid_days'))),
         start_date: nz(fd.get('start_date')),
         end_date: nz(fd.get('end_date')),
+      };
+      // Quote visit -> calendar entry linked to the job
+      const syncVisit = async jobId => {
+        if (!fd.has('visit_date')) return;
+        const date = nz(fd.get('visit_date')), time = nz(fd.get('visit_time')), vid = fd.get('visit_id');
+        const ex = vid ? (S.data.events || []).find(e => e.id === vid) : null;
+        if (S.data.eventsMissing) return;
+        if (date && ex) { if (ex.event_date !== date || fmtTime(ex.start_time) !== (time || '')) await saveRow('events', ex.id, { event_date: date, start_time: time }); }
+        else if (date) await saveRow('events', null, { title: 'Quote visit', kind: 'visit', event_date: date, start_time: time, who: 'both', job_id: jobId, done: false });
+        else if (ex) await deleteRow('events', ex.id);
       };
       if (row.status === 'finished' && !(old && old.finished_date)) row.finished_date = today();
       if (row.status !== 'finished' && row.status !== 'declined') row.finished_date = null;
@@ -1665,7 +1790,8 @@ const FORMS = {
       if (!id) {
         row.created_by = S.session?.user?.email || null;
         const saved = await saveRow('jobs', null, row);
-        toast('Job created');
+        await syncVisit(saved.id);
+        toast(row.status === 'quoted' ? 'Quote saved' : 'Job created');
         location.replace(`#/job/${saved.id}`);
         return;
       }
@@ -1674,7 +1800,8 @@ const FORMS = {
       const same = (a, b) => String(a ?? '') === String(b ?? '') || (typeof a === 'number' && num(b) === a && b !== '' && b != null);
       const patch = Object.fromEntries(Object.entries(row).filter(([k, v]) => !same(v, old[k])));
       if (Object.keys(patch).length) await saveRow('jobs', id, patch);
-      toast(Object.keys(patch).length ? 'Saved' : 'No changes');
+      await syncVisit(id);
+      toast('Saved');
       goBack(`#/job/${id}`);
     });
   },
@@ -1772,6 +1899,19 @@ const FORMS = {
     });
   },
 
+  async note(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      const text = (fd.get('text') || '').replace(/\s+$/, '');
+      if (!text.trim()) throw new Error('Type something first');
+      const id = fd.get('id') || null;
+      const who = S.me ? nameOf(S.me) : (S.session?.user?.email || '').split('@')[0] || null;
+      const row = { text, pinned: fd.get('pinned') === 'on', updated_by: who, updated_at: new Date().toISOString() };
+      if (!id) Object.assign(row, { created_by: S.session?.user?.email || null });
+      await saveRow('notes', id, row);
+      closeSheet(); render(); toast('Note saved');
+    });
+  },
+
   async overhead(fd, form) {
     await busy(form.querySelector('button.primary'), async () => {
       await saveRow('overheads', fd.get('id') || null, {
@@ -1815,6 +1955,18 @@ const ACT = {
     goBack();
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
+  noteSheet(d) { noteSheet(d.id); },
+  swapKind(d, el) {
+    const f = el.closest('form');
+    if (f) S.newDraft = Object.fromEntries(new FormData(f));
+    location.replace(el.getAttribute('href'));
+  },
+  toggleTheme() {
+    const dark = !isDark();
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    try { localStorage.setItem('cb-theme', dark ? 'dark' : 'light'); } catch {}
+    document.querySelectorAll('.theme-switch').forEach(b => { b.setAttribute('aria-checked', dark); b.querySelector('i').innerHTML = dark ? ICON.moon : ICON.sun; });
+  },
   async refresh(d, el) { await busy(el, async () => { await loadData(); S.urls = {}; render(); toast('Up to date'); }); },
   filter(d) { S.filter = d.f; render(); },
   calMonth(d) { S.calMonth = d.m; S.calDay = null; render(); },
@@ -1886,6 +2038,7 @@ const ACT = {
   async sendPdf(d, el) {
     const j = jobById(d.id);
     const isQuote = d.type === 'quote';
+    if (isQuote && !j.quote_date && j.status === 'quoted') saveRow('jobs', j.id, { quote_date: today() }).catch(console.error);
     const text = () => `${set().business_name} ${isQuote ? 'quote' : 'invoice'} ${isQuote ? 'Q' : 'INV'}-${String(j.ref ?? 0).padStart(4, '0')} — ${j.title}`;
     // Second tap after Safari blocked the first share: share the ready-made file instantly
     if (S.readyPdf && S.readyPdf.key === `${j.id}/${d.type}`) {
@@ -1990,7 +2143,7 @@ const ACT = {
       const row = Object.fromEntries(keep.map(k => [k, j[k] ?? null]));
       row.title = `${j.title} (copy)`;
       row.status = 'quoted';
-      row.quote_date = today();
+      row.quote_date = null;
       row.created_by = S.session?.user?.email || null;
       const nj = await saveRow('jobs', null, row);
       for (const c of costsOf(j.id)) {
@@ -2111,6 +2264,11 @@ async function seedDemo() {
     { title: 'Holiday', kind: 'away', event_date: addDays(t, 7), end_date: addDays(t, 9), who: 'b' },
   ]) await db.insert('events', { id: crypto.randomUUID(), done: false, end_date: null, start_time: null, job_id: null, notes: null, ...e });
   await mk({ title: 'Kitchen leak repair', status: 'declined', customer_name: 'D. Brown', postcode: 'TN38 0AA', price: 180, quote_date: addDays(t, -50), finished_date: addDays(t, -45) });
+  for (const n of [
+    { text: 'Key safe codes\nMill Lane: 4417\nSea Road (back gate): 2090', pinned: true, updated_by: 'Luke' },
+    { text: 'Trade accounts\nPlumb Centre acc no. on the card in the van\nCEF: ask for the trade price', pinned: false, updated_by: 'Henry' },
+    { text: 'Van — things to buy\nSpare PTFE, 15mm push-fit elbows, new hacksaw blades', pinned: false, updated_by: 'Luke' },
+  ]) await db.insert('notes', { id: crypto.randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...n });
 }
 
 // ======================================================================
@@ -2150,6 +2308,7 @@ document.addEventListener('input', e => {
   const k = e.target.dataset?.input;
   if (!k) return;
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
+  if (k === 'noteSearch') { S.noteSearch = e.target.value; document.getElementById('notes-list').innerHTML = notesListHtml(); }
   if (k === 'archiveSearch') { S.archiveSearch = e.target.value; document.getElementById('archive-list').innerHTML = archiveListHtml(); }
   if (k === 'customer') {
     const f = e.target.closest('form');

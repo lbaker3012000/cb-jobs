@@ -1,5 +1,5 @@
 // Data layer: Supabase when configured, otherwise a local demo store.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261115i';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116a';
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 const TABLES = ['jobs', 'costs', 'payments', 'photos'];
@@ -73,6 +73,7 @@ const remote = {
       fetchAll(c, 'overheads'),
       fetchAll(c, 'events'),
       fetchAll(c, 'tasks'),
+      fetchAll(c, 'notes'),
     ]);
     TABLES.forEach((t, i) => { out[t] = check(results[i]); });
     const s = check(results[TABLES.length]);
@@ -88,6 +89,10 @@ const remote = {
     const tk = results[TABLES.length + 3];
     out.tasks = tk.error ? [] : tk.data;
     out.tasksMissing = !!tk.error;
+    // Notes table is optional: the app still works if schema.sql hasn't been re-run
+    const nt = results[TABLES.length + 4];
+    out.notes = nt.error ? [] : nt.data;
+    out.notesMissing = !!nt.error;
     out.settingsMissing = !s.length;
     out.settings = s[0]?.data || {};
     return out;
@@ -134,7 +139,7 @@ function readStore() {
     const s = JSON.parse(localStorage.getItem(KEY));
     if (s && s.jobs) return s;
   } catch { /* ignore */ }
-  return { jobs: [], costs: [], payments: [], photos: [], overheads: [], events: [], tasks: [], settings: {}, files: {} };
+  return { jobs: [], costs: [], payments: [], photos: [], overheads: [], events: [], tasks: [], notes: [], settings: {}, files: {} };
 }
 function writeStore(s) {
   try { localStorage.setItem(KEY, JSON.stringify(s)); }
@@ -172,7 +177,7 @@ const local = {
   async loadAll() {
     const s = readStore();
     const out = { settings: s.settings || {}, settingsMissing: false };
-    [...TABLES, 'overheads', 'events', 'tasks'].forEach(t => { out[t] = structuredClone(s[t] || []); });
+    [...TABLES, 'overheads', 'events', 'tasks', 'notes'].forEach(t => { out[t] = structuredClone(s[t] || []); });
     return out;
   },
   async insert(table, row) {

@@ -145,6 +145,17 @@ create table if not exists public.tasks (
   created_at timestamptz not null default now()
 );
 
+-- General notes: anything that doesn't fit a job (codes, supplier info, ideas...)
+create table if not exists public.notes (
+  id uuid primary key default gen_random_uuid(),
+  text text not null default '',
+  pinned boolean not null default false,
+  created_by text,
+  updated_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists costs_job_idx on public.costs(job_id);
 create index if not exists payments_job_idx on public.payments(job_id);
 create index if not exists photos_job_idx on public.photos(job_id);
@@ -157,6 +168,9 @@ begin new.updated_at = now(); return new; end; $$;
 drop trigger if exists jobs_touch on public.jobs;
 create trigger jobs_touch before update on public.jobs
   for each row execute function public.touch_updated_at();
+drop trigger if exists notes_touch on public.notes;
+create trigger notes_touch before update on public.notes
+  for each row execute function public.touch_updated_at();
 
 drop trigger if exists settings_touch on public.settings;
 create trigger settings_touch before update on public.settings
@@ -166,7 +180,7 @@ create trigger settings_touch before update on public.settings
 do $$
 declare t text;
 begin
-  foreach t in array array['settings','jobs','costs','payments','photos','overheads','events','tasks'] loop
+  foreach t in array array['settings','jobs','costs','payments','photos','overheads','events','tasks','notes'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "members only" on public.%I', t);
     execute format(
@@ -200,7 +214,7 @@ create policy "members delete photos" on storage.objects
 do $$
 declare t text;
 begin
-  foreach t in array array['jobs','costs','payments','photos','overheads','settings','events','tasks'] loop
+  foreach t in array array['jobs','costs','payments','photos','overheads','settings','events','tasks','notes'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then null;
