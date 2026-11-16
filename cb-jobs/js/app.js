@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261116a';
+import { db, DEMO } from './db.js?v=20261116b';
 
-const APP_VERSION = '16 Nov 2026';
+const APP_VERSION = '16 Nov 2026 (2)';
 
 // ======================================================================
 // State & helpers
@@ -923,7 +923,9 @@ function editView({ id }) {
       </div>` : `<input type="hidden" name="vat_rate" value="${v('vat_rate')}">`}
     </section>
     <section class="card">
-      ${quote ? `<h3>Sending the quote</h3>${quoteSent}${isNew ? '' : `<h4>If it goes ahead</h4>${workDates}`}`
+      ${quote ? `<h3>Sending the quote</h3>${quoteSent}
+        <h4>Pencil in the work <span class="muted small">(optional)</span></h4>
+        <p class="muted small">Got rough dates in mind? They show on the calendar as <i>pencilled in</i> until it's confirmed.</p>${workDates}`
         : `<h3>Dates</h3>${workDates}${isNew ? `<input type="hidden" name="quote_valid_days" value="${v('quote_valid_days')}">` : `<h4>Quote</h4>${quoteSent}`}`}
     </section>
     <section class="card">
