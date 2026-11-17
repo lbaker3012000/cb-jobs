@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117h';
+import { db, DEMO } from './db.js?v=20261117i';
 
-const APP_VERSION = '17 Nov 2026 (8)';
+const APP_VERSION = '17 Nov 2026 (9)';
 
 // ======================================================================
 // State & helpers
@@ -58,7 +58,7 @@ const PHOTO_KINDS = { before: 'Before', during: 'During', after: 'After', receip
 const OH_FREQ = { weekly: ['Weekly', 52], monthly: ['Monthly', 12], quarterly: ['Quarterly', 4], yearly: ['Yearly', 1], oneoff: ['One-off', 0] };
 const OH_CATS = {
   marketing: 'Marketing & leads', insurance: 'Insurance', vehicle: 'Van & fuel', phone: 'Phone, IT & software',
-  accreditation: 'Registrations & certs', professional: 'Accountant & bank', tools: 'Tools, PPE & consumables', other: 'Other',
+  accreditation: 'Registrations & certs', professional: 'Accountant & bank', tools: 'Tools & equipment', vanstock: 'Van stock & consumables', other: 'Other',
 };
 const OH_PRESETS = [
   ['Checkatrade', 'marketing', 'monthly'], ['Public liability insurance', 'insurance', 'yearly'],
@@ -1710,21 +1710,31 @@ function coverBar(cv, compact = false) {
   </div>`;
 }
 
-const isTool = o => o && o.frequency === 'oneoff' && o.category === 'tools';
+// One-off purchases with their own box on the Money tab
+const BUY_KINDS = {
+  tools: { title: 'Tools &amp; equipment', btn: 'Tool purchase', id: 'tools', what: 'e.g. Milwaukee rotary tool + 12v batteries', saved: 'Tool purchase saved',
+    empty: 'Bought a drill, a pipe cutter or PPE? Add it here so it comes off profit and you can see who paid.' },
+  vanstock: { title: 'Van stock', btn: 'Van stock', id: 'vanstock', what: 'e.g. P-traps, silicone, PTFE, push-fit fittings', saved: 'Van stock saved',
+    empty: 'Materials and consumables kept in the van for any job (silicone, traps, fittings) — not bought for one particular job.' },
+};
+const buyKind = o => (o && o.frequency === 'oneoff' && BUY_KINDS[o.category] ? o.category : null);
+const isTool = o => !!buyKind(o);
 
-function toolsCardHtml() {
+function buyCardHtml(kind) {
+  const K = BUY_KINDS[kind];
   const t = today();
   const ty = taxYearOf(t);
   const from = tyStart(ty);
-  const tools = (S.data.overheads || []).filter(isTool)
+  const items = (S.data.overheads || []).filter(o => buyKind(o) === kind)
     .sort((a, b) => String(b.start_date || b.created_at || '').localeCompare(String(a.start_date || a.created_at || '')));
-  const inYear = tools.filter(o => (o.start_date || String(o.created_at || '').slice(0, 10)) >= from);
+  const inYear = items.filter(o => (o.start_date || String(o.created_at || '').slice(0, 10)) >= from);
   const total = sum(inYear.map(o => num(o.amount)));
   const paidA = sum(inYear.map(o => num(o.amount) * (o.paid_by === 'a' ? 1 : o.paid_by === 'split' ? 0.5 : 0)));
-  const shown = S.showAllTools ? tools : tools.slice(0, 5);
-  return `<section class="card" id="tools">
-    <div class="row"><h3>Tools &amp; equipment</h3><button class="btn small primary" data-act="toolSheet">${ICON.plus} Tool purchase</button></div>
-    ${tools.length ? `
+  const showAll = S.showAllBuys?.[kind];
+  const shown = showAll ? items : items.slice(0, 5);
+  return `<section class="card" id="${K.id}">
+    <div class="row"><h3>${K.title}</h3><button class="btn small primary" data-act="buySheet" data-k="${kind}">${ICON.plus} ${K.btn}</button></div>
+    ${items.length ? `
       <div class="kv"><span>Spent this tax year (${tyLabel(ty)})</span><b>${money(total)}</b></div>
       ${total ? `<div class="kv small"><span>Paid by ${esc(nameOf('a'))} · ${esc(nameOf('b'))}</span><b>${money(paidA)} · ${money(total - paidA)}</b></div>` : ''}
       <div class="list tools-list">${shown.map(o => `
@@ -1732,9 +1742,9 @@ function toolsCardHtml() {
           <div class="row"><strong>${esc(o.name)}</strong><b>${money(o.amount)}</b></div>
           <div class="row small muted"><span>${o.start_date ? fmtDate(o.start_date) : ''}${o.notes ? ` · ${esc(o.notes)}` : ''}</span><span class="who ${o.paid_by}">${o.paid_by === 'split' ? 'Split' : esc(nameOf(o.paid_by))}</span></div>
         </button>`).join('')}</div>
-      ${tools.length > 5 ? `<button class="link-btn" data-act="toggleTools">${S.showAllTools ? 'Show less' : `Show all ${tools.length}`}</button>` : ''}
+      ${items.length > 5 ? `<button class="link-btn" data-act="toggleBuys" data-k="${kind}">${showAll ? 'Show less' : `Show all ${items.length}`}</button>` : ''}
       <p class="muted small">Counted as a business cost, so it comes off profit like your other running costs.</p>`
-    : '<p class="muted small">Bought a drill, a pipe cutter or PPE? Add it here so it comes off profit and you can see who paid.</p>'}
+    : `<p class="muted small">${K.empty}</p>`}
   </section>`;
 }
 
@@ -1819,7 +1829,8 @@ function overheadsBody() {
 
 
 
-  ${toolsCardHtml()}
+  ${buyCardHtml('vanstock')}
+  ${buyCardHtml('tools')}
 
   <div class="row section-row"><h2 class="section-title">Your bills</h2><button class="btn small primary" data-act="ohSheet">${ICON.plus} Add bill</button></div>
   <div class="list">
@@ -1835,12 +1846,13 @@ function ohSheet(id, preset) {
   if (!x) return;
   const v = k => esc(x[k] ?? '');
   if (isTool(x)) {
+    const K = BUY_KINDS[buyKind(x)];
     openSheet(`<form data-form="overhead" class="form">
-      ${sheetHead(id ? 'Tool purchase' : 'Add tool purchase', id, 'overheads')}
+      ${sheetHead(id ? K.btn : `Add ${K.btn.toLowerCase()}`, id, 'overheads')}
       <input type="hidden" name="id" value="${id || ''}">
       <input type="hidden" name="frequency" value="oneoff">
-      <input type="hidden" name="category" value="tools">
-      <label>What did you buy?<input name="name" required value="${v('name')}" placeholder="e.g. Milwaukee rotary tool + 12v batteries" autocomplete="off"></label>
+      <input type="hidden" name="category" value="${buyKind(x)}">
+      <label>What did you buy?<input name="name" required value="${v('name')}" placeholder="${K.what}" autocomplete="off"></label>
       <div class="two">
         <label>Cost £<input name="amount" type="number" inputmode="decimal" step="0.01" min="0" required value="${v('amount')}"></label>
         <label>Date bought<input name="start_date" type="date" value="${v('start_date')}"></label>
@@ -2383,7 +2395,7 @@ const FORMS = {
         end_date: nz(fd.get('end_date')),
         notes: nz(fd.get('notes')?.trim()),
       });
-      closeSheet(); render(); toast(fd.get('category') === 'tools' && fd.get('frequency') === 'oneoff' ? 'Tool purchase saved' : 'Overhead saved');
+      closeSheet(); render(); toast(fd.get('frequency') === 'oneoff' && BUY_KINDS[fd.get('category')] ? BUY_KINDS[fd.get('category')].saved : 'Overhead saved');
     });
   },
 
@@ -2517,8 +2529,8 @@ const ACT = {
   photoKind(d) { (S.photoKind ||= {})[d.id] = d.k; render(); },
   viewPhoto(d) { viewPhoto(d.id); },
   ohSheet(d) { ohSheet(d.id); },
-  toolSheet() { ohSheet(null, { frequency: 'oneoff', category: 'tools', paid_by: S.payer || S.me }); },
-  toggleTools() { S.showAllTools = !S.showAllTools; render(); },
+  buySheet(d) { ohSheet(null, { frequency: 'oneoff', category: d.k, paid_by: S.payer || S.me }); },
+  toggleBuys(d) { S.showAllBuys = { ...(S.showAllBuys || {}), [d.k]: !S.showAllBuys?.[d.k] }; render(); },
   taskSheet(d) { taskSheet(d.id); },
   taskKind(d) { taskSheet(null, d.k); },
   nextStepSheet(d) { nextStepSheet(d.id); },
