@@ -80,7 +80,14 @@ export function dueNotifications(data, now, since) {
       for (const j of running) lines.push(`${j.status === 'quoted' ? 'Pencilled in: ' : 'Job: '}${jobName(j)}${j.title && jobAddr(j) ? ` (${j.title})` : ''}`);
       const away = (data.events || []).filter(e => e.kind === 'away' && e.event_date <= t && (e.end_date || e.event_date) >= t);
       for (const e of away) lines.push(`${e.who === 'a' ? NAMES.a : e.who === 'b' ? NAMES.b : 'Both'} away`);
-      const openTasks = (data.tasks || []).filter(x => !x.done).length;
+      const open = (data.tasks || []).filter(x => !x.done);
+      for (const x of open.filter(x => x.due_date === t)) {
+        const next = Array.isArray(x.steps) ? x.steps.find(st => !st.done) : null;
+        lines.push(`Due today: ${x.text}${next ? ` (next: ${next.text})` : ''}`);
+      }
+      const overdueTasks = open.filter(x => x.due_date && x.due_date < t).length;
+      if (overdueTasks) lines.push(`${overdueTasks} to-do${overdueTasks > 1 ? 's' : ''} overdue`);
+      const openTasks = open.length;
       const owed = jobs.filter(j => j.status === 'finished' && gross(j) - paidOf(j.id) > 0.004);
       const extras = [];
       if (openTasks) extras.push(`${openTasks} to-do${openTasks > 1 ? 's' : ''}`);

@@ -260,3 +260,7 @@ alter table public.costs add column if not exists created_by text default lower(
 alter table public.payments add column if not exists created_by text default lower(auth.jwt() ->> 'email');
 alter table public.events add column if not exists created_by text default lower(auth.jwt() ->> 'email');
 -- The 15-minute schedule (pg_cron + pg_net) is created once in Supabase; see README.
+
+-- To-dos: due dates and multi-step lists (added 17 Nov 2026)
+alter table public.tasks add column if not exists due_date date;
+alter table public.tasks add column if not exists steps jsonb;  -- null = quick to-do; [{id,text,done,done_at}] = multi-step

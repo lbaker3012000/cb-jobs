@@ -724,3 +724,33 @@ input.switch:checked { background: var(--green-2); }
 input.switch:checked::after { transform: translateX(20px); }
 html[data-theme="dark"] input.switch { background: #2a4257; }
 html[data-theme="dark"] input.switch:checked { background: var(--green-2); }
+
+/* To-dos: due dates and multi-step */
+.due { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--green-soft); color: var(--muted); margin-top: 4px; }
+.due.today, .due.soon { background: var(--orange-soft); color: #8a5a1c; }
+.due.over { background: #f9dcd7; color: #a3321f; }
+html[data-theme="dark"] .due.today, html[data-theme="dark"] .due.soon { background: #3b2d17; color: #e9bf7f; }
+html[data-theme="dark"] .due.over { background: #3a1d1a; color: #f0a093; }
+.todo-item.multi { align-items: flex-start; }
+.step-count { flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--green-soft); display: flex; align-items: center; justify-content: center; font-size: .72rem; color: var(--muted); }
+.step-count b { color: var(--ink); font-size: .9rem; }
+.todo-item.multi .task-text { display: block; width: 100%; padding: 0; }
+.step-bar { height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.step-bar i { display: block; height: 100%; background: var(--green-2); }
+.next-step { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .88rem; }
+.next-step em { font-style: normal; color: var(--muted); }
+.next-step .btn { flex: none; }
+button.card.choose { width: 100%; text-align: left; font: inherit; cursor: pointer; margin-bottom: 10px; }
+.due-chips { margin-bottom: 6px; }
+.step-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.step-row { display: flex; align-items: center; gap: 8px; }
+.step-row input[name=step_text] { flex: 1; margin: 0; }
+.step-row.done input[name=step_text] { text-decoration: line-through; color: var(--muted); }
+.step-tick { margin: 0; flex: none; position: relative; width: 28px; height: 28px; }
+.step-tick input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.step-tick span { display: block; width: 28px; height: 28px; border-radius: 7px; border: 2px solid #c9c4ba; background: var(--card); }
+.step-tick input:checked + span { background: var(--green-2); border-color: var(--green-2); }
+.step-tick input:checked + span::after { content: '✓'; color: #fff; font-weight: 800; display: flex; justify-content: center; line-height: 24px; }
+.step-del { flex: none; width: 32px; height: 32px; border: 0; background: none; color: var(--muted); font-size: 1.3rem; cursor: pointer; }
+.step-add { display: flex; gap: 8px; margin-bottom: 12px; }
+.step-add input { flex: 1; margin: 0; }

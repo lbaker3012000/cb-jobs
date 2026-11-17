@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117a';
+import { db, DEMO } from './db.js?v=20261117b';
 
-const APP_VERSION = '17 Nov 2026';
+const APP_VERSION = '17 Nov 2026 (2)';
 
 // ======================================================================
 // State & helpers
@@ -464,9 +464,44 @@ function jobsView() {
   });
 }
 
+// Due-date label for a to-do: overdue / today / tomorrow / date
+function dueChip(x) {
+  if (!x.due_date) return '';
+  const t = today();
+  if (x.due_date < t) return `<span class="due over">Overdue · ${fmtShort(x.due_date)}</span>`;
+  if (x.due_date === t) return '<span class="due today">Due today</span>';
+  if (x.due_date === addDays(t, 1)) return '<span class="due soon">Due tomorrow</span>';
+  return `<span class="due">Due ${fmtShort(x.due_date)}</span>`;
+}
+const taskSteps = x => (Array.isArray(x.steps) ? x.steps : null);
+const sortTasks = list => list.slice().sort((a, b) =>
+  String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')) || String(a.created_at).localeCompare(String(b.created_at)));
+
+function taskRowHtml(x) {
+  const steps = taskSteps(x);
+  if (!steps) {
+    return `<div class="todo-item mine">
+      <button class="tick" data-act="taskDone" data-id="${x.id}" aria-label="Done"></button>
+      <button class="ti-main task-text" data-act="taskSheet" data-id="${x.id}">${esc(x.text)}${x.due_date ? `<br>${dueChip(x)}` : ''}</button>
+    </div>`;
+  }
+  const done = steps.filter(st => st.done).length;
+  const next = steps.find(st => !st.done);
+  return `<div class="todo-item mine multi">
+    <span class="step-count" aria-label="${done} of ${steps.length} steps done"><b>${done}</b>/${steps.length}</span>
+    <div class="ti-main">
+      <button class="task-text" data-act="taskSheet" data-id="${x.id}">${esc(x.text)}</button>
+      <div class="step-bar"><i style="width:${steps.length ? (done / steps.length) * 100 : 0}%"></i></div>
+      ${next ? `<div class="next-step"><span><em>Next:</em> ${esc(next.text)}</span><button class="btn small" data-act="stepDone" data-id="${x.id}" data-step="${esc(next.id)}">✓ Done</button></div>`
+        : `<div class="next-step"><span class="muted">All steps done</span><button class="btn small primary" data-act="taskDone" data-id="${x.id}">Finish</button></div>`}
+      ${x.due_date ? dueChip(x) : ''}
+    </div>
+  </div>`;
+}
+
 function todoHtml() {
   const auto = todos();
-  const mine = (S.data.tasks || []).filter(x => !x.done).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const mine = sortTasks((S.data.tasks || []).filter(x => !x.done));
   const total = mine.length + auto.length;
   const limit = 5;
   const shownMine = S.showAllTodos ? mine : mine.slice(0, limit);
@@ -476,10 +511,7 @@ function todoHtml() {
   if (!total) return `<section class="card todo">${head}<p class="todo-clear">All caught up. Tap <b>+</b> to add something to do.</p></section>`;
   return `<section class="card todo">
     ${head}
-    ${shownMine.map(x => `<div class="todo-item mine">
-      <button class="tick" data-act="taskDone" data-id="${x.id}" aria-label="Done"></button>
-      <button class="ti-main task-text" data-act="taskSheet" data-id="${x.id}">${esc(x.text)}</button>
-    </div>`).join('')}
+    ${shownMine.map(taskRowHtml).join('')}
     ${shownAuto.map(t => `<div class="todo-item">
       <span class="ti-icon p${t.pri}">${t.icon}</span>
       <div class="ti-main">
@@ -496,18 +528,68 @@ function todoHtml() {
   </section>`;
 }
 
+// Quick due-date buttons: Today / Tomorrow / Friday / Next week / none
+function dueField(val) {
+  const t = today();
+  const dow = parseISO(t).getDay();
+  const fri = addDays(t, ((5 - dow + 7) % 7) || 7);
+  const opts = [['Today', t], ['Tomorrow', addDays(t, 1)], ['Friday', fri], ['Next week', addDays(t, 7)]];
+  return `<div class="field-label">Due date <span class="muted small">(optional)</span></div>
+    <div class="chips wrap due-chips">${opts.map(([l, d]) => `<button type="button" class="chip ${val === d ? 'on' : ''}" data-act="pickDue" data-d="${d}">${l}</button>`).join('')}
+      <button type="button" class="chip ${val ? '' : 'on'}" data-act="pickDue" data-d="">No date</button></div>
+    <input type="date" name="due_date" value="${esc(val || '')}">`;
+}
+
+function addStepRow(form, text) {
+  const list = form.querySelector('#step-list');
+  list.insertAdjacentHTML('beforeend', stepRowHtml({ id: (crypto.randomUUID?.() || String(Date.now() + Math.random())), text, done: false }));
+  form.dataset.dirty = '1';
+}
+
+function stepRowHtml(st) {
+  return `<div class="step-row ${st.done ? 'done' : ''}" data-step-id="${esc(st.id)}">
+    <label class="step-tick"><input type="checkbox" name="step_done" ${st.done ? 'checked' : ''}><span></span></label>
+    <input name="step_text" value="${esc(st.text)}" placeholder="Step" autocomplete="off">
+    <button type="button" class="step-del" data-act="stepDel" aria-label="Remove step">×</button>
+  </div>`;
+}
+
 // Add / edit one of your own To do items
-function taskSheet(id) {
+function taskSheet(id, kind) {
   if (S.data.tasksMissing) { toast('To-dos need the database set up: run supabase/schema.sql in Supabase', true); return; }
-  const x = id ? (S.data.tasks || []).find(t => t.id === id) : { text: '' };
+  const x = id ? (S.data.tasks || []).find(t => t.id === id) : { text: '', steps: kind === 'multi' ? [] : null };
   if (!x) return;
+  // New to-do: ask which kind first
+  if (!id && !kind) {
+    openSheet(`<div class="form">
+      ${sheetHead('Add to do')}
+      <p class="muted choose-lead">What kind?</p>
+      <button class="card choose" data-act="taskKind" data-k="quick">
+        <span class="choose-icon">✓</span>
+        <span><strong>A quick to-do</strong><em>One thing to do, e.g. order a shower tray</em></span>
+      </button>
+      <button class="card choose" data-act="taskKind" data-k="multi">
+        <span class="choose-icon">☰</span>
+        <span><strong>A multi-step to-do</strong><em>Several steps to tick off as you go, e.g. sorting a warranty claim</em></span>
+      </button>
+    </div>`);
+    return;
+  }
+  const steps = taskSteps(x);
+  const multi = !!steps;
   openSheet(`<form data-form="task" class="form">
-    ${sheetHead(id ? 'Edit to-do' : 'Add to-do', id, 'tasks')}
+    ${sheetHead(id ? (multi ? 'Multi-step to-do' : 'Edit to-do') : (multi ? 'New multi-step to-do' : 'New to-do'), id, 'tasks')}
     <input type="hidden" name="id" value="${id || ''}">
-    <label>What needs doing?<input name="text" required value="${esc(x.text)}" placeholder="e.g. Order shower tray for Mill Lane" autocomplete="off" enterkeyhint="done"></label>
+    <input type="hidden" name="multi" value="${multi ? '1' : ''}">
+    <label>${multi ? 'What\'s it about?' : 'What needs doing?'}<input name="text" required value="${esc(x.text)}" placeholder="${multi ? 'e.g. Pamela – Aqualisa warranty' : 'e.g. Order shower tray for Mill Lane'}" autocomplete="off" enterkeyhint="${multi ? 'next' : 'done'}"></label>
+    ${multi ? `
+      <div class="field-label">Steps <span class="muted small">(tick them off as you go; add more any time)</span></div>
+      <div class="step-list" id="step-list">${steps.map(stepRowHtml).join('')}</div>
+      <div class="step-add"><input id="step-new" placeholder="Add a step, e.g. Call Aqualisa" autocomplete="off" enterkeyhint="done"><button type="button" class="btn" data-act="stepAdd">Add</button></div>` : ''}
+    ${dueField(x.due_date)}
     <button class="btn primary wide big">Save</button>
   </form>`);
-  setTimeout(() => sheet.querySelector('[name=text]')?.focus(), 60);
+  setTimeout(() => sheet.querySelector(id && multi ? '#step-new' : '[name=text]')?.focus(), 60);
 }
 
 function matches(j, q) {
@@ -1995,7 +2077,20 @@ const FORMS = {
       const text = (fd.get('text') || '').trim();
       if (!text) throw new Error('Type what needs doing');
       const id = fd.get('id') || null;
-      await saveRow('tasks', id, id ? { text } : { text, done: false, created_by: S.session?.user?.email || null });
+      const row = { text, due_date: nz(fd.get('due_date')) };
+      if (fd.get('multi')) {
+        // A step typed in the box but not yet added still counts
+        const pending = form.querySelector('#step-new')?.value.trim();
+        if (pending) addStepRow(form, pending);
+        const old = id ? taskSteps((S.data.tasks || []).find(t => t.id === id)) || [] : [];
+        row.steps = [...form.querySelectorAll('.step-row')].map(r => {
+          const sid = r.dataset.stepId;
+          const was = old.find(o => o.id === sid);
+          const done = r.querySelector('[name=step_done]').checked;
+          return { id: sid, text: r.querySelector('[name=step_text]').value.trim(), done, done_at: done ? (was?.done_at || new Date().toISOString()) : null };
+        }).filter(st => st.text);
+      }
+      await saveRow('tasks', id, id ? row : { ...row, done: false, created_by: S.session?.user?.email || null });
       closeSheet(); render(); toast(id ? 'Saved' : 'Added to your to-do list');
     });
   },
@@ -2152,6 +2247,32 @@ const ACT = {
   viewPhoto(d) { viewPhoto(d.id); },
   ohSheet(d) { ohSheet(d.id); },
   taskSheet(d) { taskSheet(d.id); },
+  taskKind(d) { taskSheet(null, d.k); },
+  pickDue(d, el) {
+    const f = el.closest('form');
+    f.querySelector('[name=due_date]').value = d.d;
+    f.querySelectorAll('.due-chips .chip').forEach(c => c.classList.toggle('on', c === el));
+  },
+  stepAdd(d, el) {
+    const f = el.closest('form');
+    const inp = f.querySelector('#step-new');
+    const v = inp.value.trim();
+    if (!v) { inp.focus(); return; }
+    addStepRow(f, v);
+    inp.value = ''; inp.focus();
+  },
+  stepDel(d, el) { el.closest('.step-row')?.remove(); },
+  async stepDone(d, el) {
+    const x = (S.data.tasks || []).find(t => t.id === d.id);
+    if (!x) return;
+    const steps = (taskSteps(x) || []).map(st => (st.id === d.step ? { ...st, done: true, done_at: new Date().toISOString() } : st));
+    const all = steps.every(st => st.done);
+    await busy(el, async () => {
+      await saveRow('tasks', x.id, all ? { steps, done: true, done_at: new Date().toISOString() } : { steps });
+      render();
+      toast(all ? 'All steps done ✓' : 'Step done ✓');
+    });
+  },
   async taskDone(d, el) {
     el.classList.add('on');
     el.closest('.todo-item')?.classList.add('done');
@@ -2442,6 +2563,14 @@ document.addEventListener('change', e => {
   const jobId = e.target.dataset?.photoJob;
   if (!jobId || !e.target.files?.length) return;
   uploadPhotos(jobId, [...e.target.files], e.target);
+});
+
+// To-do steps: Enter adds the step; ticking strikes it through
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'step-new') { e.preventDefault(); ACT.stepAdd({}, e.target); }
+});
+document.addEventListener('change', e => {
+  if (e.target.name === 'step_done') e.target.closest('.step-row')?.classList.toggle('done', e.target.checked);
 });
 
 document.addEventListener('input', e => {
