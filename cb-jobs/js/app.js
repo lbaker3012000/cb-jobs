@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117b';
+import { db, DEMO } from './db.js?v=20261117c';
 
-const APP_VERSION = '17 Nov 2026 (2)';
+const APP_VERSION = '17 Nov 2026 (3)';
 
 // ======================================================================
 // State & helpers
@@ -493,7 +493,7 @@ function taskRowHtml(x) {
       <button class="task-text" data-act="taskSheet" data-id="${x.id}">${esc(x.text)}</button>
       <div class="step-bar"><i style="width:${steps.length ? (done / steps.length) * 100 : 0}%"></i></div>
       ${next ? `<div class="next-step"><span><em>Next:</em> ${esc(next.text)}</span><button class="btn small" data-act="stepDone" data-id="${x.id}" data-step="${esc(next.id)}">✓ Done</button></div>`
-        : `<div class="next-step"><span class="muted">All steps done</span><button class="btn small primary" data-act="taskDone" data-id="${x.id}">Finish</button></div>`}
+        : `<div class="next-step waiting"><span><em>What's next?</em></span><span class="btn-row"><button class="btn small primary" data-act="nextStepSheet" data-id="${x.id}">+ Next step</button><button class="btn small" data-act="taskDone" data-id="${x.id}">Finished</button></span></div>`}
       ${x.due_date ? dueChip(x) : ''}
     </div>
   </div>`;
@@ -544,6 +544,27 @@ function addStepRow(form, text) {
   const list = form.querySelector('#step-list');
   list.insertAdjacentHTML('beforeend', stepRowHtml({ id: (crypto.randomUUID?.() || String(Date.now() + Math.random())), text, done: false }));
   form.dataset.dirty = '1';
+}
+
+// After the last planned step is ticked: what's next?
+function nextStepSheet(id, justDone) {
+  const x = (S.data.tasks || []).find(t => t.id === id);
+  if (!x) return;
+  const steps = taskSteps(x) || [];
+  openSheet(`<form data-form="nextStep" class="form">
+    ${sheetHead(justDone ? 'Step done ✓' : 'What\'s next?')}
+    <input type="hidden" name="id" value="${x.id}">
+    <p class="muted small">${esc(x.text)}${justDone ? ` · ticked off: <b>${esc(justDone)}</b>` : ''} · ${steps.length} step${steps.length === 1 ? '' : 's'} done so far</p>
+    <label>What's the next step?<input name="step" placeholder="e.g. Wait for Aqualisa engineer date" autocomplete="off" enterkeyhint="done"></label>
+    ${dueField(x.due_date)}
+    <button class="btn primary wide big">Add next step</button>
+    <div class="btn-row">
+      <button type="button" class="btn grow" data-act="closeSheet">Not sure yet</button>
+      <button type="button" class="btn grow" data-act="nextStepFinish" data-id="${x.id}">That's everything ✓</button>
+    </div>
+    <p class="muted small">"Not sure yet" keeps it on your list with a <b>What's next?</b> reminder.</p>
+  </form>`);
+  setTimeout(() => sheet.querySelector('[name=step]')?.focus(), 60);
 }
 
 function stepRowHtml(st) {
@@ -2095,6 +2116,17 @@ const FORMS = {
     });
   },
 
+  async nextStep(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      const text = (fd.get('step') || '').trim();
+      if (!text) throw new Error('Type the next step, or tap "Not sure yet"');
+      const x = (S.data.tasks || []).find(t => t.id === fd.get('id'));
+      const steps = [...(taskSteps(x) || []), { id: crypto.randomUUID?.() || String(Date.now()), text, done: false, done_at: null }];
+      await saveRow('tasks', x.id, { steps, due_date: nz(fd.get('due_date')) });
+      closeSheet(); render(); toast('Next step added');
+    });
+  },
+
   async price(fd, form) {
     await busy(form.querySelector('button.primary'), async () => {
       const v = fd.get('price');
@@ -2248,6 +2280,13 @@ const ACT = {
   ohSheet(d) { ohSheet(d.id); },
   taskSheet(d) { taskSheet(d.id); },
   taskKind(d) { taskSheet(null, d.k); },
+  nextStepSheet(d) { nextStepSheet(d.id); },
+  async nextStepFinish(d, el) {
+    await busy(el, async () => {
+      await saveRow('tasks', d.id, { done: true, done_at: new Date().toISOString() });
+      closeSheet(); render(); toast('All done ✓');
+    });
+  },
   pickDue(d, el) {
     const f = el.closest('form');
     f.querySelector('[name=due_date]').value = d.d;
@@ -2266,11 +2305,12 @@ const ACT = {
     const x = (S.data.tasks || []).find(t => t.id === d.id);
     if (!x) return;
     const steps = (taskSteps(x) || []).map(st => (st.id === d.step ? { ...st, done: true, done_at: new Date().toISOString() } : st));
-    const all = steps.every(st => st.done);
+    const ticked = steps.find(st => st.id === d.step);
     await busy(el, async () => {
-      await saveRow('tasks', x.id, all ? { steps, done: true, done_at: new Date().toISOString() } : { steps });
+      await saveRow('tasks', x.id, { steps });
       render();
-      toast(all ? 'All steps done ✓' : 'Step done ✓');
+      if (steps.every(st => st.done)) nextStepSheet(x.id, ticked?.text);
+      else toast('Step done ✓');
     });
   },
   async taskDone(d, el) {

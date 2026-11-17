@@ -754,3 +754,6 @@ button.card.choose { width: 100%; text-align: left; font: inherit; cursor: point
 .step-del { flex: none; width: 32px; height: 32px; border: 0; background: none; color: var(--muted); font-size: 1.3rem; cursor: pointer; }
 .step-add { display: flex; gap: 8px; margin-bottom: 12px; }
 .step-add input { flex: 1; margin: 0; }
+.next-step.waiting em { color: #8a5a1c; font-weight: 600; }
+html[data-theme="dark"] .next-step.waiting em { color: #e9bf7f; }
+.next-step .btn-row { display: flex; gap: 6px; flex: none; }
