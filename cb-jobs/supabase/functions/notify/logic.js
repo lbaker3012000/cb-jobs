@@ -138,7 +138,20 @@ export function dueNotifications(data, now, since) {
       }
     }
 
-    // 5. Changes made by the other person (off unless turned on)
+    // 5. Claude has sorted an invoice / request and it needs approving (with message pop-ups)
+    if (prefs.messages && since) {
+      for (const it of data.inbox || []) {
+        if (!it.processed_at || Date.parse(it.processed_at) < Date.parse(since)) continue;
+        if (it.status !== 'proposed' && it.status !== 'question') continue;
+        const what = it.kind === 'invoice' ? (it.file_name || 'invoice') : 'your request';
+        push('messages', `inbox:${it.id}:${it.processed_at}`,
+          it.status === 'question' ? 'Claude has a question' : 'Claude: ready to approve',
+          it.status === 'question' ? `About ${what}: ${String(it.question || '').slice(0, 120)}` : `${what} — ${String(it.proposal?.summary || 'tap to check and approve').slice(0, 120)}`,
+          '#/inbox');
+      }
+    }
+
+    // 6. Changes made by the other person (off unless turned on)
     if (prefs.changes && since) {
       const mine = String(sub.email || '').toLowerCase();
       const fresh = (rows, kind, text, url) => {

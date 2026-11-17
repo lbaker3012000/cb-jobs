@@ -100,6 +100,7 @@ Deno.serve(async req => {
       all('jobs'), all('costs'), all('payments'), all('events'), all('tasks'), all('overheads'), all('settings'), all('push_subs'),
     ]);
     if (!subs.length) return json({ sent: 0, note: 'no devices' });
+    const inbox = await all('inbox_items', 'id, kind, file_name, status, question, proposal, processed_at').catch(() => []);
     const nameByEmail: Record<string, string> = {};
     for (const m of (await all('members', 'email, who')) as any[]) if (m.who) nameByEmail[String(m.email).toLowerCase()] = NAMES[m.who as 'a' | 'b'];
     const whoByEmail: Record<string, string> = {};
@@ -112,7 +113,7 @@ Deno.serve(async req => {
 
     const now = londonNow();
     const since = body.since || new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const due = dueNotifications({ jobs, costs, payments, events, tasks, overheads, settings: (settingsRows[0] as any)?.data || {}, subs, nameByEmail }, now, since);
+    const due = dueNotifications({ jobs, costs, payments, events, tasks, overheads, inbox, settings: (settingsRows[0] as any)?.data || {}, subs, nameByEmail }, now, since);
     if (body.dryRun) return json({ now, due: due.map(d => ({ to: d.sub.email, type: d.type, key: d.key, title: d.title, body: d.body })) });
 
     let sent = 0;

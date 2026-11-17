@@ -286,3 +286,37 @@ alter table public.messages add column if not exists photo_path text;
 alter table public.messages drop constraint if exists messages_text_check;
 alter table public.messages add constraint messages_text_check check (length(trim(text)) > 0 or photo_path is not null);
 alter table public.messages alter column text set default '';
+
+-- Inbox: invoices and requests for Claude to sort out, with an Approve step (added 17 Nov 2026)
+-- status: reading (phone still reading the file) → new → proposed / question → approved / rejected
+create table if not exists public.inbox_items (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null default 'invoice' check (kind in ('invoice','request')),
+  text text,                 -- what was typed (request, or a note with the invoice)
+  file_path text,            -- in the job-photos bucket under inbox/
+  file_name text,
+  file_type text,
+  extracted_text text,       -- invoice text read on the phone (PDF text or photo OCR)
+  job_id uuid references public.jobs(id) on delete set null,
+  paid_by text check (paid_by in ('a','b')),
+  status text not null default 'new' check (status in ('reading','new','proposed','question','approved','rejected')),
+  proposal jsonb,            -- {summary, actions:[{type,label,...}]}
+  question text,             -- Claude's question
+  answer text,               -- reply to the question / change request
+  claude_note text,
+  processed_at timestamptz,
+  decided_by text,
+  decided_at timestamptz,
+  created_by text default lower(auth.jwt() ->> 'email'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists inbox_status_idx on public.inbox_items (status, created_at);
+alter table public.inbox_items enable row level security;
+drop policy if exists "members only" on public.inbox_items;
+create policy "members only" on public.inbox_items for all to authenticated using (public.is_member()) with check (public.is_member());
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'inbox_items') then
+    alter publication supabase_realtime add table public.inbox_items;
+  end if;
+end $$;

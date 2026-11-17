@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117i';
+import { db, DEMO } from './db.js?v=20261117j';
 
-const APP_VERSION = '17 Nov 2026 (9)';
+const APP_VERSION = '17 Nov 2026 (10)';
 
 // ======================================================================
 // State & helpers
@@ -21,6 +21,10 @@ const S = {
   calMonth: null,
   calDay: null,
   taxYear: null,
+  inboxFiles: [],
+  inboxText: '',
+  inboxJob: null,
+  reading: {},
 };
 
 const app = document.getElementById('app');
@@ -97,6 +101,9 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>',
   send: '<svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>',
+  inbox: '<svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z"/></svg>',
+  upload: '<svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>',
+  spark: '<svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z"/></svg>',
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
@@ -346,7 +353,7 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView,
+    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView,
   };
   const typing = r.view === 'chat' && document.activeElement?.id === 'chat-input';
   const nearBottom = r.view !== 'chat' || (window.innerHeight + window.scrollY >= document.body.scrollHeight - 160);
@@ -365,6 +372,7 @@ function render() {
 
 function after(r) {
   if (r.view === 'job') loadPhotoUrls(r.id);
+  if (r.view === 'inbox') resumeInboxReading();
   if (r.view === 'settings' && S.push && S.push.status !== 'checking' && !S._pushChecked) { S._pushChecked = true; refreshPush(); }
   if (r.view === 'overheads') setTimeout(() => document.getElementById('overheads')?.scrollIntoView({ block: 'start' }), 0);
   if (r.view === 'calendar' && r.id && /^\d{4}-\d\d-\d\d$/.test(r.id)) {
@@ -380,7 +388,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   <header class="top">
     ${back ? `<button class="icon-btn" data-act="back" aria-label="Back">${ICON.back}</button>` : '<div class="brand"><img class="brand-mark" src="img/house-gold.png" alt=""><span class="wordmark">C<i>&amp;</i>B</span></div>'}
     <h1>${esc(title)}</h1>
-    <div class="top-right">${right}${msgBtn()}${themeSwitch()}</div>
+    <div class="top-right">${right}${inboxBtn()}${msgBtn()}${themeSwitch()}</div>
   </header>
   ${S.offlineSince ? `<div class="offline-banner"><b>No signal</b> — showing jobs as of ${new Date(S.offlineSince).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}. You can look, but changes can't be saved until you're back online.</div>` : ''}
   ${DEMO ? '<div class="demo-banner"><b>Demo</b> — sample jobs to try out. Changes stay on this phone only.</div>' : ''}
@@ -516,6 +524,303 @@ async function markMessagesRead() {
   for (const m of list) { try { await saveRow('messages', m.id, { read_at: at }); } catch { /* try again next time */ } }
 }
 
+// ======================================================================
+// Inbox for Claude: upload invoices or type requests, Claude proposes, you approve
+// ======================================================================
+const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+const TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+const TESS_LANG = 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int';
+const INBOX_STATUS = { reading: 'Reading the file…', new: 'Waiting for Claude', proposed: 'Ready to approve', question: 'Claude has a question', approved: 'Done', rejected: 'Rejected' };
+const ACTION_TYPES = { new_job: 'New job', update_job: 'Change job', add_cost: 'Cost', add_payment: 'Payment', add_overhead: 'Business buy', add_task: 'To-do', add_note: 'Note' };
+const myEmail = () => String(S.session?.user?.email || '').toLowerCase();
+const byName = email => {
+  const m = (S.data?.members || []).find(x => String(x.email).toLowerCase() === String(email || '').toLowerCase());
+  if (m?.who) return m.who === S.me && String(email).toLowerCase() === myEmail() ? 'You' : nameOf(m.who);
+  return String(email || '').toLowerCase() === myEmail() ? 'You' : (String(email || 'Someone').split('@')[0]);
+};
+const inboxItems = () => (S.data?.inbox_items || []);
+const inboxNeeds = () => inboxItems().filter(i => i.status === 'proposed' || i.status === 'question');
+const inboxBtn = () => (S.data && !S.data.inboxMissing && route().view !== 'inbox'
+  ? `<a class="icon-btn msg-btn" href="#/inbox" aria-label="Invoices for Claude">${ICON.inbox}${inboxNeeds().length ? '<i class="dot"></i>' : ''}</a>` : '');
+
+let pdfLib = null;
+let tessLoading = null;
+async function loadPdf() {
+  if (!pdfLib) {
+    pdfLib = await import(`${PDFJS_BASE}pdf.min.mjs`);
+    pdfLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}pdf.worker.min.mjs`;
+  }
+  return pdfLib;
+}
+function loadTess() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  tessLoading ||= new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = TESS_URL;
+    s.onload = () => res(window.Tesseract);
+    s.onerror = () => { tessLoading = null; rej(new Error('Could not load the photo reader — check your signal')); };
+    document.head.appendChild(s);
+  });
+  return tessLoading;
+}
+// Read the words in a photo (or a drawn PDF page) on this phone
+async function ocrText(img, onProgress) {
+  const T = await loadTess();
+  const w = await T.createWorker('eng', 1, {
+    langPath: TESS_LANG,
+    logger: m => { if (m.status === 'recognizing text') onProgress?.(Math.round((m.progress || 0) * 100)); },
+  });
+  try { return (await w.recognize(img)).data.text || ''; } finally { await w.terminate().catch(() => {}); }
+}
+// PDF text, keeping each printed line together (so prices stay next to their item)
+function pdfLines(items) {
+  const rows = [];
+  for (const it of items) {
+    if (!it.str || !it.transform) continue;
+    const y = it.transform[5]; const x = it.transform[4];
+    let row = rows.find(r => Math.abs(r.y - y) < 3);
+    if (!row) { row = { y, parts: [] }; rows.push(row); }
+    row.parts.push({ x, s: it.str, w: it.width || 0 });
+  }
+  rows.sort((a, b) => b.y - a.y);
+  return rows.map(r => {
+    r.parts.sort((a, b) => a.x - b.x);
+    let out = ''; let end = null;
+    for (const p of r.parts) { out += end == null ? p.s : (p.x - end > 12 ? '   ' : (out.endsWith(' ') || p.s.startsWith(' ') ? '' : ' ')) + p.s; end = p.x + p.w; }
+    return out.trim();
+  }).filter(Boolean).join('\n');
+}
+async function pdfText(blob, onProgress) {
+  const lib = await loadPdf();
+  const doc = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  const pages = [];
+  for (let i = 1; i <= Math.min(doc.numPages, 10); i++) pages.push(pdfLines((await (await doc.getPage(i)).getTextContent()).items));
+  let text = pages.join('\n\n--- next page ---\n\n');
+  if (text.replace(/\s/g, '').length < 40) { // a scanned PDF: read the pages as pictures
+    const parts = [];
+    for (let i = 1; i <= Math.min(doc.numPages, 3); i++) {
+      const page = await doc.getPage(i);
+      const vp = page.getViewport({ scale: 2 });
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+      await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      parts.push(await ocrText(cv, onProgress));
+    }
+    text = parts.join('\n\n--- next page ---\n\n');
+  }
+  return text;
+}
+const isPdf = x => /pdf/i.test(x?.file_type || x?.type || '') || /\.pdf$/i.test(x?.file_name || x?.name || '');
+
+// Read an uploaded file and save its text so Claude can work from it
+async function readInboxFile(item, blob) {
+  S.reading[item.id] = 'Reading…';
+  const label = t => { S.reading[item.id] = t; const el = document.getElementById(`rd-${item.id}`); if (el) el.textContent = t; };
+  let text = ''; let err = null;
+  try {
+    if (!blob) {
+      const urls = await db.fileUrls([item.file_path]);
+      blob = await (await fetch(urls[item.file_path])).blob();
+    }
+    label(isPdf(item) ? 'Reading the PDF…' : 'Reading the photo… (first time takes a minute)');
+    text = isPdf(item) ? await pdfText(blob, p => label(`Reading… ${p}%`)) : await ocrText(blob, p => label(`Reading the photo… ${p}%`));
+  } catch (e) { console.error(e); err = e; }
+  text = String(text || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 20000);
+  delete S.reading[item.id];
+  try {
+    await saveRow('inbox_items', item.id, {
+      extracted_text: text || (err ? `[The phone couldn't read this file: ${err.message || err}]` : '[No words found in this file]'),
+      status: 'new', updated_at: new Date().toISOString(),
+    });
+  } catch (e) { console.error(e); }
+  if (route().view === 'inbox' && sheet.hidden && !document.activeElement?.matches('input,textarea,select')) render();
+}
+// If the app was closed while a file was being read, carry on next time it's opened
+function resumeInboxReading() {
+  for (const it of inboxItems()) {
+    if (it.status !== 'reading' || !it.file_path || S.reading[it.id]) continue;
+    const mine = String(it.created_by || '').toLowerCase() === myEmail();
+    const stale = Date.now() - Date.parse(it.created_at) > 10 * 60000;
+    if (mine || stale) readInboxFile(it);
+  }
+}
+
+async function addInboxFiles(list) {
+  const files = [...(list || [])];
+  for (const f of files) {
+    const pdf = isPdf(f);
+    if (!pdf && !/^image\//.test(f.type) && !/\.(jpe?g|png|heic|heif|webp)$/i.test(f.name)) { toast(`${f.name}: only photos and PDFs`, true); continue; }
+    if (f.size > 20 * 1024 * 1024) { toast(`${f.name} is too big (20MB max)`, true); continue; }
+    const blob = pdf ? f : await compress(f, 2200);
+    const name = pdf ? f.name : String(f.name || 'photo').replace(/\.[a-z0-9]+$/i, '') + '.jpg';
+    S.inboxFiles.push({ blob, name, type: pdf ? 'application/pdf' : (blob.type || 'image/jpeg'), url: pdf ? null : URL.createObjectURL(blob) });
+  }
+  render();
+}
+
+function actionDetail(a) {
+  const j = a.job_id ? jobById(a.job_id) : null;
+  const jl = j ? jobName(j) : (a.job_id ? 'the new job above' : '');
+  const bits = [];
+  if (a.type === 'add_cost') {
+    bits.push(money(num(a.qty || 1) * num(a.unit_cost)) + (num(a.qty || 1) !== 1 ? ` (${r2(num(a.qty))} × ${money(a.unit_cost)})` : ''));
+    if (a.supplier) bits.push(a.supplier);
+    bits.push(`paid by ${nameOf(a.paid_by)}`);
+    if (a.cost_date) bits.push(fmtShort(a.cost_date));
+  } else if (a.type === 'add_payment') {
+    bits.push(money(a.amount), `to ${nameOf(a.received_by)}`);
+    if (a.pay_date) bits.push(fmtShort(a.pay_date));
+  } else if (a.type === 'add_overhead') {
+    bits.push(money(a.amount), OH_CATS[a.category] || a.category || '', a.paid_by === 'split' ? 'split 50/50' : `paid by ${nameOf(a.paid_by)}`);
+  } else if (a.type === 'new_job') {
+    const n = a.job || {};
+    bits.push(n.status === 'quoted' || !n.status ? 'Quote' : STATUS[n.status] || n.status);
+    if (n.customer_name) bits.push(n.customer_name);
+    if (n.address) bits.push(String(n.address).split('\n')[0]);
+    if (num(n.price)) bits.push(money(n.price));
+  } else if (a.type === 'update_job') {
+    bits.push(Object.entries(a.patch || {}).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${k === 'price' ? money(v) : /_date$/.test(k) && v ? fmtShort(v) : v}`).join(', '));
+  } else if (a.type === 'add_task') {
+    if (a.due_date) bits.push(`due ${fmtShort(a.due_date)}`);
+    if (a.steps?.length) bits.push(`${a.steps.length} steps`);
+  }
+  if (jl && a.type !== 'new_job') bits.push(jl);
+  return bits.filter(Boolean).map(esc).join(' · ');
+}
+
+function inboxCardHtml(it) {
+  const j = it.job_id ? jobById(it.job_id) : null;
+  const acts = it.proposal?.actions || [];
+  const head = `<div class="ib-head">
+    <span class="ib-ico">${it.kind === 'invoice' ? ICON.doc : ICON.chat}</span>
+    <div class="ib-title"><b>${esc(it.kind === 'invoice' ? (it.file_name || 'Invoice') : 'Request')}</b>
+      <span class="muted small">${esc(byName(it.created_by))} · ${timeAgo(it.created_at)}${j ? ` · <a href="#/job/${j.id}">${esc(jobName(j))}</a>` : ''}${it.paid_by ? ` · paid by ${esc(nameOf(it.paid_by))}` : ''}</span></div>
+    <span class="ib-status s-${it.status}">${INBOX_STATUS[it.status] || it.status}</span>
+  </div>`;
+  const note = it.text ? `<div class="ib-text">${nl2br(it.text)}</div>` : '';
+  const file = it.file_path ? `<button class="link-btn small" data-act="inboxFile" data-id="${it.id}">View file</button>` : '';
+  const read = it.extracted_text ? `<details class="ib-read"><summary>What the phone read</summary><pre>${esc(it.extracted_text)}</pre></details>` : '';
+  const answer = it.answer ? `<div class="ib-answer muted small">${nl2br(it.answer)}</div>` : '';
+  let main = '';
+  if (it.status === 'reading') {
+    main = `<p class="muted small" id="rd-${it.id}">${esc(S.reading[it.id] || `Being read on ${byName(it.created_by) === 'You' ? 'this' : `${byName(it.created_by)}'s`} phone…`)}</p>`;
+  } else if (it.status === 'new') {
+    main = `<p class="muted small">Claude checks at 12pm and 6pm. Need it sooner? Tell Claude "process invoices".</p>`;
+  } else if (it.status === 'proposed') {
+    main = `<form data-form="inboxApprove" class="ib-proposal">
+      <input type="hidden" name="id" value="${it.id}">
+      ${it.proposal?.summary ? `<p class="ib-summary">${ICON.spark} ${nl2br(it.proposal.summary)}</p>` : ''}
+      <div class="ib-acts">${acts.map((a, i) => `<label class="ib-act ${a.done ? 'done' : ''}">
+        <input type="checkbox" name="act" value="${i}" ${a.done ? 'checked disabled' : 'checked'}>
+        <span><b><em>${esc(ACTION_TYPES[a.type] || a.type)}</em> ${esc(a.label || '')}</b><span class="muted small">${actionDetail(a)}</span></span>
+      </label>`).join('') || '<p class="muted small">Nothing to add.</p>'}</div>
+      ${it.claude_note ? `<p class="muted small">${nl2br(it.claude_note)}</p>` : ''}
+      <div class="btn-row">
+        <button class="btn primary grow">Approve${acts.length > 1 ? ' ticked' : ''}</button>
+        <button type="button" class="btn" data-act="inboxReplySheet" data-id="${it.id}">Change</button>
+        <button type="button" class="btn danger" data-act="inboxRejectSheet" data-id="${it.id}">Reject</button>
+      </div>
+    </form>`;
+  } else if (it.status === 'question') {
+    main = `<div class="ib-question">${ICON.spark} ${nl2br(it.question || 'Claude needs more detail.')}</div>
+    <form data-form="inboxReply" class="ib-reply">
+      <input type="hidden" name="id" value="${it.id}">
+      <textarea name="text" rows="2" required placeholder="Your answer"></textarea>
+      <div class="btn-row"><button class="btn primary grow">Send answer</button><button type="button" class="btn danger" data-act="inboxRejectSheet" data-id="${it.id}">Cancel it</button></div>
+    </form>`;
+  } else {
+    const did = acts.filter(a => a.done);
+    main = `${did.length ? `<ul class="ib-done">${did.map(a => `<li>${esc(ACTION_TYPES[a.type] || a.type)}: ${esc(a.label || '')}</li>`).join('')}</ul>` : ''}
+      ${it.claude_note ? `<p class="muted small">${nl2br(it.claude_note)}</p>` : ''}
+      <p class="muted small">${it.status === 'approved' ? 'Approved' : 'Rejected'}${it.decided_by ? ` by ${esc(byName(it.decided_by))}` : ''}${it.decided_at ? ` · ${timeAgo(it.decided_at)}` : ''}</p>`;
+  }
+  const del = ['reading', 'new', 'rejected', 'approved'].includes(it.status) ? `<button class="link-btn small danger-text" data-act="inboxDelete" data-id="${it.id}">Delete</button>` : '';
+  return `<article class="card ib-card ibs-${it.status}">${head}${note}${answer}${main}<div class="ib-foot">${file}${del}</div>${read}</article>`;
+}
+
+function inboxView({ id }) {
+  if (S.data.inboxMissing) return layout({ title: 'Inbox', back: true, body: '<div class="empty">The inbox needs the database set up.</div>' });
+  if (id && jobById(id) && S.inboxJobFrom !== id) { S.inboxJob = id; S.inboxJobFrom = id; }
+  const list = inboxItems().slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const needs = list.filter(i => i.status === 'proposed' || i.status === 'question');
+  const waiting = list.filter(i => i.status === 'new' || i.status === 'reading');
+  const done = list.filter(i => i.status === 'approved' || i.status === 'rejected');
+  const jobs = S.data.jobs.filter(j => j.status !== 'declined')
+    .sort((a, b) => (a.status === 'finished') - (b.status === 'finished') || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)))
+    .slice(0, 80);
+  const payer = S.inboxPayer ?? getPayer();
+  const files = S.inboxFiles;
+  const body = `
+  <form data-form="inbox" class="card ib-new">
+    <h3>Send to Claude</h3>
+    <label class="dropzone" id="ib-drop">
+      ${ICON.upload}
+      <b>Drop invoices here</b>
+      <span class="muted small">or tap to take a photo / choose a PDF</span>
+      <input type="file" id="inbox-file" accept="image/*,application/pdf,.pdf" multiple class="file-hidden">
+    </label>
+    ${files.length ? `<div class="ib-files">${files.map((f, i) => `<div class="ib-file">${f.url ? `<img src="${esc(f.url)}" alt="">` : `<span class="ib-pdf">${ICON.doc}<i>PDF</i></span>`}<span>${esc(f.name)}</span><button type="button" data-act="inboxFileRemove" data-i="${i}" aria-label="Remove">×</button></div>`).join('')}</div>` : ''}
+    <label>${files.length ? 'Anything Claude should know?' : 'Or type what needs doing'} <span class="muted small">(optional${files.length ? '' : ' if you add a file'})</span>
+      <textarea name="text" rows="3" data-input="inboxText" placeholder="${files.length ? 'e.g. tiles for Pevensey, the trap is for Joshua' : 'e.g. Joshua paid £175 today by bank to Henry'}">${esc(S.inboxText || '')}</textarea></label>
+    <label>Which job? <span class="muted small">(optional — Claude will work it out)</span>
+      <select name="job_id" data-input="inboxJob"><option value="">Not sure / not for a job</option>${jobs.map(j => `<option value="${j.id}" ${j.id === S.inboxJob ? 'selected' : ''}>${esc(jobName(j))}${j.customer_name ? ` – ${esc(j.customer_name)}` : ''}</option>`).join('')}</select></label>
+    <div class="field-label">Who paid?</div>
+    <div class="seg3">${[['a', nameOf('a')], ['b', nameOf('b')], ['', 'Not sure / n/a']].map(([k, l]) =>
+      `<label class="${payer === k ? 'on' : ''}"><input type="radio" name="paid_by" value="${k}" ${payer === k ? 'checked' : ''} data-input="inboxPayer">${l}</label>`).join('')}</div>
+    <button class="btn primary wide big" id="ib-send">${ICON.send} Send to Claude</button>
+    <p class="muted small center">Claude checks at 12pm and 6pm and puts what it would add here for you to approve. Nothing changes until you press Approve.</p>
+  </form>
+  ${needs.length ? `<h2 class="section-title">Needs you <span class="count">${needs.length}</span></h2>${needs.map(inboxCardHtml).join('')}` : ''}
+  ${waiting.length ? `<h2 class="section-title">Waiting for Claude</h2>${waiting.map(inboxCardHtml).join('')}` : ''}
+  ${done.length ? `<details class="ib-history"><summary class="section-title">Done (${done.length})</summary>${done.slice(0, 30).map(inboxCardHtml).join('')}</details>` : ''}
+  ${!list.length ? '<p class="muted small center">Nothing sent yet.</p>' : ''}`;
+  return layout({ title: 'Claude inbox', back: true, body });
+}
+
+function inboxBannerHtml() {
+  const n = inboxNeeds();
+  if (!n.length) return '';
+  const q = n.filter(i => i.status === 'question').length;
+  return `<a class="msg-banner ib-banner" href="#/inbox">
+    <div class="msg-banner-main"><b>${ICON.spark} Claude ${q === n.length ? `has ${q === 1 ? 'a question' : `${q} questions`}` : `has ${n.length} thing${n.length === 1 ? '' : 's'} ready to approve`}</b>
+    <span class="muted small">Invoices &amp; requests — tap to check</span></div>
+    <span class="btn small primary">Open</span>
+  </a>`;
+}
+
+// Turning an approved proposal into real records
+const ALLOW = {
+  jobs: ['title', 'status', 'customer_name', 'customer_phone', 'customer_email', 'address', 'postcode', 'description', 'notes', 'price', 'vat_applies', 'vat_rate', 'who', 'quote_date', 'start_date', 'end_date', 'finished_date'],
+  costs: ['description', 'category', 'qty', 'unit_cost', 'supplier', 'paid_by', 'cost_date'],
+  payments: ['pay_date', 'amount', 'kind', 'method', 'received_by', 'note'],
+  overheads: ['name', 'category', 'amount', 'frequency', 'paid_by', 'start_date', 'end_date', 'notes'],
+};
+const pickKeys = (o, keys) => Object.fromEntries(keys.filter(k => o && o[k] !== undefined).map(k => [k, o[k]]));
+async function applyAction(a, keyMap) {
+  const jid = a.job_id ? (keyMap[a.job_id] || a.job_id) : null;
+  const needJob = () => { if (!jid || !jobById(jid)) throw new Error(`Couldn't find the job for "${a.label || ACTION_TYPES[a.type]}"`); return jid; };
+  const now = new Date().toISOString();
+  switch (a.type) {
+    case 'new_job': {
+      const row = { status: 'quoted', ...pickKeys(a.job || {}, ALLOW.jobs) };
+      if (!row.title) row.title = row.description ? String(row.description).slice(0, 60) : 'Job';
+      const r = await saveRow('jobs', null, row);
+      if (a.key) keyMap[a.key] = r.id;
+      return r.id;
+    }
+    case 'update_job': return (await saveRow('jobs', needJob(), pickKeys(a.patch || {}, ALLOW.jobs))).id;
+    case 'add_cost': return (await saveRow('costs', null, { category: 'materials', qty: 1, cost_date: today(), paid_by: S.me, ...pickKeys(a, ALLOW.costs), description: a.description || a.label || 'Materials', job_id: needJob() })).id;
+    case 'add_payment': return (await saveRow('payments', null, { kind: 'stage', method: 'bank', pay_date: today(), received_by: S.me, ...pickKeys(a, ALLOW.payments), job_id: needJob() })).id;
+    case 'add_overhead': return (await saveRow('overheads', null, { frequency: 'oneoff', start_date: today(), paid_by: S.me, category: 'other', ...pickKeys(a, ALLOW.overheads), name: a.name || a.label || 'Purchase' })).id;
+    case 'add_task': return (await saveRow('tasks', null, {
+      text: a.text || a.label, due_date: a.due_date || null, done: false, created_by: myEmail(),
+      steps: a.steps?.length ? a.steps.map(t => ({ id: crypto.randomUUID(), text: String(t), done: false, done_at: null })) : null,
+    })).id;
+    case 'add_note': return (await saveRow('notes', null, { text: a.text || a.label || '', pinned: false, created_by: myEmail(), updated_by: myEmail(), updated_at: now })).id;
+    default: throw new Error(`Unknown change type: ${a.type}`);
+  }
+}
+
 // Dark mode: remembered on each phone
 const isDark = () => document.documentElement.dataset.theme === 'dark';
 const themeSwitch = () => `<button class="theme-switch" data-act="toggleTheme" role="switch" aria-checked="${isDark()}" aria-label="Dark mode"><i>${isDark() ? ICON.moon : ICON.sun}</i></button>`;
@@ -579,6 +884,7 @@ function jobsView() {
     <button data-act="filter" data-f="owed" class="${unpaid.length ? 'warn' : ''}"><b>${money0(sum(unpaid.map(j => calc(j).balance)))}</b><span>owed to you</span></button>
   </div>
   ${stripHtml()}
+  ${inboxBannerHtml()}
   ${msgBannerHtml()}
   ${todoHtml()}
   <h2 class="section-title">Jobs</h2>
@@ -911,6 +1217,7 @@ function costsTab(j, c) {
     </div>` : ''}
     ${st.vat_registered ? '<p class="muted small">VAT registered: enter costs ex-VAT where you reclaim the VAT.</p>' : ''}
     <button class="btn primary wide" data-act="costSheet" data-job="${j.id}">${ICON.plus} Add cost</button>
+    ${S.data.inboxMissing ? '' : `<a class="btn wide ib-jobbtn" href="#/inbox/${j.id}">${ICON.upload} Upload invoice for Claude to fill in</a>`}
   </section>`;
 }
 
@@ -2154,6 +2461,84 @@ function getPayer() { try { const v = localStorage.getItem('cb-payer'); return v
 function setPayer(p) { if (p !== 'a' && p !== 'b') return; S.payer = p; try { localStorage.setItem('cb-payer', p); } catch { /* ignore */ } }
 
 const FORMS = {
+  async inbox(fd, form) {
+    const text = (S.inboxText || fd.get('text') || '').trim();
+    const files = S.inboxFiles.slice();
+    if (!text && !files.length) { toast('Add an invoice or type what needs doing', true); return; }
+    const btn = form.querySelector('#ib-send');
+    btn.disabled = true; btn.classList.add('busy');
+    const now = new Date().toISOString();
+    const base = { job_id: S.inboxJob || null, paid_by: fd.get('paid_by') || null, text: text || null, created_by: myEmail(), updated_at: now };
+    const toRead = [];
+    try {
+      if (!files.length) await saveRow('inbox_items', null, { ...base, kind: 'request', status: 'new' });
+      for (const f of files) {
+        const safe = f.name.replace(/[^\w.-]+/g, '_').slice(-60);
+        const path = `inbox/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
+        await db.upload(path, f.blob);
+        const row = await saveRow('inbox_items', null, { ...base, kind: 'invoice', status: 'reading', file_path: path, file_name: f.name, file_type: f.type });
+        S.reading[row.id] = 'Reading…';
+        toRead.push([row, f.blob]);
+        S.inboxFiles = S.inboxFiles.filter(x => x !== f);
+      }
+      files.forEach(f => f.url && URL.revokeObjectURL(f.url));
+      S.inboxFiles = []; S.inboxText = ''; S.inboxJob = null;
+      render();
+      toast(files.length ? `Sent — reading ${files.length === 1 ? 'the file' : `${files.length} files`} now` : 'Sent to Claude');
+      for (const [row, blob] of toRead) await readInboxFile(row, blob);
+    } catch (e) {
+      toast(friendly(e), true);
+      btn.disabled = false; btn.classList.remove('busy');
+      if (toRead.length) render();
+    }
+  },
+
+  async inboxApprove(fd, form) {
+    const it = inboxItems().find(x => x.id === fd.get('id'));
+    if (!it) return;
+    const chosen = new Set(fd.getAll('act').map(Number));
+    const acts = structuredClone(it.proposal?.actions || []);
+    if (acts.length && !acts.some((a, i) => chosen.has(i) && !a.done)) { toast('Tick at least one thing, or press Reject', true); return; }
+    const btn = form.querySelector('button.primary');
+    btn.disabled = true; btn.classList.add('busy');
+    const keys = { ...(it.proposal?.keys || {}) };
+    try {
+      for (let i = 0; i < acts.length; i++) {
+        if (!chosen.has(i) || acts[i].done) continue;
+        acts[i].result_id = await applyAction(acts[i], keys);
+        acts[i].done = true;
+      }
+      acts.forEach((a, i) => { if (!a.done && !chosen.has(i)) a.skipped = true; });
+      await saveRow('inbox_items', it.id, { status: 'approved', proposal: { ...it.proposal, actions: acts, keys }, decided_by: myEmail(), decided_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      render(); toast('Approved — added to the app');
+    } catch (e) {
+      // Remember what did go in, so pressing Approve again won't add it twice
+      await saveRow('inbox_items', it.id, { proposal: { ...it.proposal, actions: acts, keys } }).catch(() => {});
+      render(); toast(friendly(e), true);
+    }
+  },
+
+  async inboxReply(fd) {
+    const it = inboxItems().find(x => x.id === fd.get('id'));
+    const text = String(fd.get('text') || '').trim();
+    if (!it || !text) return;
+    const who = S.meKnown ? nameOf(S.me) : 'Reply';
+    const history = [it.question && it.status === 'question' ? `Claude asked: ${it.question}` : '', `${who}: ${text}`].filter(Boolean).join('\n');
+    try {
+      await saveRow('inbox_items', it.id, { status: 'new', answer: it.answer ? `${it.answer}\n${history}` : history, updated_at: new Date().toISOString() });
+      closeSheet(); render(); toast('Sent back to Claude');
+    } catch (e) { toast(friendly(e), true); }
+  },
+
+  async inboxReject(fd) {
+    const it = inboxItems().find(x => x.id === fd.get('id'));
+    if (!it) return;
+    const why = String(fd.get('text') || '').trim();
+    try {
+      await saveRow('inbox_items', it.id, { status: 'rejected', decided_by: myEmail(), decided_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...(why ? { answer: it.answer ? `${it.answer}\nRejected: ${why}` : `Rejected: ${why}` } : {}) });
+      closeSheet(); render(); toast('Rejected — nothing was added');
+    } catch (e) { toast(friendly(e), true); }
+  },
   async login(fd, form) {
     await busy(form.querySelector('button'), async () => {
       S.session = await db.signIn(fd.get('email').trim(), fd.get('password'));
@@ -2420,6 +2805,58 @@ const FORMS = {
 };
 
 const ACT = {
+  inboxFileRemove(d) {
+    const f = S.inboxFiles[+d.i];
+    if (f?.url) URL.revokeObjectURL(f.url);
+    S.inboxFiles.splice(+d.i, 1);
+    render();
+  },
+  async inboxFile(d) {
+    const it = inboxItems().find(x => x.id === d.id);
+    if (!it?.file_path) return;
+    const w = window.open('', '_blank');
+    try {
+      const url = (await db.fileUrls([it.file_path]))[it.file_path];
+      if (w) w.location = url; else location.href = url;
+    } catch (e) { w?.close(); toast(friendly(e), true); }
+  },
+  inboxReplySheet(d) {
+    openSheet(`<form data-form="inboxReply" class="form">
+      ${sheetHead('What needs changing?')}
+      <input type="hidden" name="id" value="${esc(d.id)}">
+      <label>Tell Claude what's wrong<textarea name="text" rows="4" required placeholder="e.g. the tiles were for Pevensey not Mill Lane, and Luke paid"></textarea></label>
+      <button class="btn primary wide big">Send back to Claude</button>
+      <p class="muted small">Claude will look again at the next check (12pm / 6pm) or when you say "process invoices".</p>
+    </form>`);
+    setTimeout(() => sheet.querySelector('textarea')?.focus(), 60);
+  },
+  inboxRejectSheet(d) {
+    openSheet(`<form data-form="inboxReject" class="form">
+      ${sheetHead('Reject this?')}
+      <input type="hidden" name="id" value="${esc(d.id)}">
+      <p>Nothing will be added to the app.</p>
+      <label>Why? <span class="muted small">(optional)</span><input name="text" placeholder="e.g. already added it myself"></label>
+      <button class="btn danger wide big">Reject</button>
+    </form>`);
+  },
+  inboxDelete(d) {
+    const it = inboxItems().find(x => x.id === d.id);
+    if (!it) return;
+    openSheet(`<div class="form">
+      ${sheetHead('Delete from inbox?')}
+      <p>${esc(it.file_name || 'This request')} will be removed${it.file_path ? ', including the file' : ''}. Anything already approved stays in the app.</p>
+      <button class="btn danger wide big" data-act="inboxDeleteGo" data-id="${it.id}">Delete</button>
+    </div>`);
+  },
+  async inboxDeleteGo(d) {
+    const it = inboxItems().find(x => x.id === d.id);
+    if (!it) return;
+    try {
+      if (it.file_path) await db.removeFiles([it.file_path]).catch(console.error);
+      await deleteRow('inbox_items', it.id);
+      closeSheet(); render(); toast('Deleted');
+    } catch (e) { toast(friendly(e), true); }
+  },
   async back() {
     const f = document.querySelector('form[data-form="job"]');
     if (f && f.dataset.dirty === '1' && !await ask('Discard your changes to this job?', 'Discard', true)) return;
@@ -2853,6 +3290,12 @@ document.addEventListener('submit', e => {
 });
 
 document.addEventListener('change', async e => {
+  if (e.target.id === 'inbox-file' && e.target.files?.length) {
+    const files = [...e.target.files];
+    e.target.value = '';
+    addInboxFiles(files).catch(err => toast(friendly(err), true));
+    return;
+  }
   if (e.target.id === 'chat-photo' && e.target.files?.[0]) {
     const f = e.target.files[0];
     e.target.value = '';
@@ -2867,6 +3310,20 @@ document.addEventListener('change', async e => {
   const jobId = e.target.dataset?.photoJob;
   if (!jobId || !e.target.files?.length) return;
   uploadPhotos(jobId, [...e.target.files], e.target);
+});
+
+// Drag invoices onto the inbox page (computer)
+['dragenter', 'dragover'].forEach(t => document.addEventListener(t, e => {
+  if (route().view !== 'inbox' || !e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  document.getElementById('ib-drop')?.classList.add('over');
+}));
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.getElementById('ib-drop')?.classList.remove('over'); });
+document.addEventListener('drop', e => {
+  if (route().view !== 'inbox' || !e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  document.getElementById('ib-drop')?.classList.remove('over');
+  addInboxFiles(e.dataTransfer.files).catch(err => toast(friendly(err), true));
 });
 
 // To-do steps: Enter adds the step; ticking strikes it through
@@ -2886,6 +3343,9 @@ document.addEventListener('input', e => {
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJob') { S.chatJob = e.target.value || null; render(); }
+  if (k === 'inboxText') S.inboxText = e.target.value;
+  if (k === 'inboxJob') S.inboxJob = e.target.value || null;
+  if (k === 'inboxPayer') { S.inboxPayer = e.target.value; e.target.closest('.seg3').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target))); }
   if (k === 'pushPref') {
     const P = S.push;
     if (P?.endpoint) {
