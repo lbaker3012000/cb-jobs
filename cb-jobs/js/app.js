@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117c';
+import { db, DEMO } from './db.js?v=20261117d';
 
-const APP_VERSION = '17 Nov 2026 (3)';
+const APP_VERSION = '17 Nov 2026 (4)';
 
 // ======================================================================
 // State & helpers
@@ -1576,12 +1576,40 @@ function coverBar(cv, compact = false) {
   </div>`;
 }
 
+const isTool = o => o && o.frequency === 'oneoff' && o.category === 'tools';
+
+function toolsCardHtml() {
+  const t = today();
+  const ty = taxYearOf(t);
+  const from = tyStart(ty);
+  const tools = (S.data.overheads || []).filter(isTool)
+    .sort((a, b) => String(b.start_date || b.created_at || '').localeCompare(String(a.start_date || a.created_at || '')));
+  const inYear = tools.filter(o => (o.start_date || String(o.created_at || '').slice(0, 10)) >= from);
+  const total = sum(inYear.map(o => num(o.amount)));
+  const paidA = sum(inYear.map(o => num(o.amount) * (o.paid_by === 'a' ? 1 : o.paid_by === 'split' ? 0.5 : 0)));
+  const shown = S.showAllTools ? tools : tools.slice(0, 5);
+  return `<section class="card" id="tools">
+    <div class="row"><h3>Tools &amp; equipment</h3><button class="btn small primary" data-act="toolSheet">${ICON.plus} Tool purchase</button></div>
+    ${tools.length ? `
+      <div class="kv"><span>Spent this tax year (${tyLabel(ty)})</span><b>${money(total)}</b></div>
+      ${total ? `<div class="kv small"><span>Paid by ${esc(nameOf('a'))} · ${esc(nameOf('b'))}</span><b>${money(paidA)} · ${money(total - paidA)}</b></div>` : ''}
+      <div class="list tools-list">${shown.map(o => `
+        <button class="item" data-act="ohSheet" data-id="${o.id}">
+          <div class="row"><strong>${esc(o.name)}</strong><b>${money(o.amount)}</b></div>
+          <div class="row small muted"><span>${o.start_date ? fmtDate(o.start_date) : ''}${o.notes ? ` · ${esc(o.notes)}` : ''}</span><span class="who ${o.paid_by}">${o.paid_by === 'split' ? 'Split' : esc(nameOf(o.paid_by))}</span></div>
+        </button>`).join('')}</div>
+      ${tools.length > 5 ? `<button class="link-btn" data-act="toggleTools">${S.showAllTools ? 'Show less' : `Show all ${tools.length}`}</button>` : ''}
+      <p class="muted small">Counted as a business cost, so it comes off profit like your other running costs.</p>`
+    : '<p class="muted small">Bought a drill, a pipe cutter or PPE? Add it here so it comes off profit and you can see who paid.</p>'}
+  </section>`;
+}
+
 function overheadsBody() {
   const sm = ohSummary();
   const t = today();
   const list = (S.data.overheads || []).slice();
   const live = sm.live.slice().sort((a, b) => ohAnnual(b) - ohAnnual(a));
-  const rest = list.filter(o => !sm.live.includes(o)).sort((a, b) => String(b.start_date || '').localeCompare(String(a.start_date || '')));
+  const rest = list.filter(o => !sm.live.includes(o) && !isTool(o)).sort((a, b) => String(b.start_date || '').localeCompare(String(a.start_date || '')));
   const now = parseISO(t);
   const thisMonth = toISO(new Date(now.getFullYear(), now.getMonth(), 1));
   const lastMonth = toISO(new Date(now.getFullYear(), now.getMonth() - 1, 1));
@@ -1657,6 +1685,8 @@ function overheadsBody() {
 
 
 
+  ${toolsCardHtml()}
+
   <div class="row section-row"><h2 class="section-title">Your bills</h2><button class="btn small primary" data-act="ohSheet">${ICON.plus} Add bill</button></div>
   <div class="list">
     ${live.length ? live.map(row).join('') : '<div class="empty">No regular bills yet. Add things like Checkatrade, insurance, van, phone and certifications — tap <b>Add bill</b> and pick from the quick list.</div>'}
@@ -1670,6 +1700,26 @@ function ohSheet(id, preset) {
     : { frequency: 'monthly', category: 'other', paid_by: S.me, start_date: today(), ...(preset || {}) };
   if (!x) return;
   const v = k => esc(x[k] ?? '');
+  if (isTool(x)) {
+    openSheet(`<form data-form="overhead" class="form">
+      ${sheetHead(id ? 'Tool purchase' : 'Add tool purchase', id, 'overheads')}
+      <input type="hidden" name="id" value="${id || ''}">
+      <input type="hidden" name="frequency" value="oneoff">
+      <input type="hidden" name="category" value="tools">
+      <label>What did you buy?<input name="name" required value="${v('name')}" placeholder="e.g. Milwaukee rotary tool + 12v batteries" autocomplete="off"></label>
+      <div class="two">
+        <label>Cost £<input name="amount" type="number" inputmode="decimal" step="0.01" min="0" required value="${v('amount')}"></label>
+        <label>Date bought<input name="start_date" type="date" value="${v('start_date')}"></label>
+      </div>
+      <div class="field-label">Who paid?</div>
+      <div class="seg3">${[['a', nameOf('a')], ['b', nameOf('b')], ['split', 'Split 50/50']].map(([k, l]) =>
+        `<label class="${(x.paid_by || 'a') === k ? 'on' : ''}"><input type="radio" name="paid_by" value="${k}" ${(x.paid_by || 'a') === k ? 'checked' : ''} data-input="segpick">${l}</label>`).join('')}</div>
+      <label>Notes <span class="muted small">(optional)</span><input name="notes" value="${v('notes')}" placeholder="e.g. Toolstation, serial no., warranty till 2028"></label>
+      <button class="btn primary wide big">Save</button>
+    </form>`);
+    if (!id) setTimeout(() => sheet.querySelector('[name=name]')?.focus(), 60);
+    return;
+  }
   openSheet(`<form data-form="overhead" class="form">
     ${sheetHead(id ? 'Edit overhead' : 'Add overhead', id, 'overheads')}
     <input type="hidden" name="id" value="${id || ''}">
@@ -2163,7 +2213,7 @@ const FORMS = {
         end_date: nz(fd.get('end_date')),
         notes: nz(fd.get('notes')?.trim()),
       });
-      closeSheet(); render(); toast('Overhead saved');
+      closeSheet(); render(); toast(fd.get('category') === 'tools' && fd.get('frequency') === 'oneoff' ? 'Tool purchase saved' : 'Overhead saved');
     });
   },
 
@@ -2278,6 +2328,8 @@ const ACT = {
   photoKind(d) { (S.photoKind ||= {})[d.id] = d.k; render(); },
   viewPhoto(d) { viewPhoto(d.id); },
   ohSheet(d) { ohSheet(d.id); },
+  toolSheet() { ohSheet(null, { frequency: 'oneoff', category: 'tools', paid_by: S.me }); },
+  toggleTools() { S.showAllTools = !S.showAllTools; render(); },
   taskSheet(d) { taskSheet(d.id); },
   taskKind(d) { taskSheet(null, d.k); },
   nextStepSheet(d) { nextStepSheet(d.id); },
