@@ -804,3 +804,15 @@ body:has(.chat-compose) main { padding-bottom: 0; }
 .chat-send:disabled { opacity: .5; }
 html[data-theme="dark"] .bubble.mine { background: #1d3a55; }
 html[data-theme="dark"] .chat-send { background: var(--gold); color: var(--navy); }
+
+/* Chat photos */
+.bubble-photo { display: block; padding: 0; margin: 0 -6px 4px; border: 0; background: none; cursor: pointer; border-radius: 14px; overflow: hidden; }
+.bubble-photo img { display: block; width: 100%; max-width: 240px; max-height: 300px; object-fit: cover; border-radius: 14px; }
+.bubble-photo .ph-load { display: flex; align-items: center; justify-content: center; width: 200px; height: 150px; background: var(--green-soft); border-radius: 14px; color: var(--muted); }
+.bubble-photo .ph-load svg { width: 28px; height: 28px; }
+.chat-photo-preview { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px; margin-bottom: 8px; font-size: .8rem; color: var(--muted); }
+.chat-photo-preview img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; flex: none; }
+.chat-photo-preview span { flex: 1; }
+.chat-photo-preview button { border: 0; background: none; font-size: 1.3rem; color: var(--muted); cursor: pointer; padding: 0 6px; }
+.chat-send.busy { animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .5; } }

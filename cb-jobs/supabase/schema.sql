@@ -281,3 +281,8 @@ create index if not exists messages_created_idx on public.messages (created_at d
 alter table public.messages enable row level security;
 drop policy if exists "members only" on public.messages;
 create policy "members only" on public.messages for all to authenticated using (public.is_member()) with check (public.is_member());
+-- Photos in messages (added 17 Nov 2026). Stored in the job-photos bucket under chat/
+alter table public.messages add column if not exists photo_path text;
+alter table public.messages drop constraint if exists messages_text_check;
+alter table public.messages add constraint messages_text_check check (length(trim(text)) > 0 or photo_path is not null);
+alter table public.messages alter column text set default '';

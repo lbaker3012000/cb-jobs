@@ -73,7 +73,9 @@ Deno.serve(async req => {
         if (!toEmails.includes(String(sub.email).toLowerCase())) continue;
         phones++;
         if (sub.prefs && sub.prefs.messages === false) continue;
-        if ((await send(sub, { title, body: msg.text, url: job ? `#/job/${job.id}` : '#/jobs', tag: `msg:${msg.id}` })) === 'sent') delivered++;
+        const text = String(msg.text || '').trim();
+        const bodyText = msg.photo_path ? (text ? `📷 ${text}` : '📷 Photo') : text;
+        if ((await send(sub, { title, body: bodyText, url: '#/chat', tag: `msg:${msg.id}` })) === 'sent') delivered++;
       }
       return json({ delivered, phones });
     }

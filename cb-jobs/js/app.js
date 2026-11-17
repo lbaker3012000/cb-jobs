@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117g';
+import { db, DEMO } from './db.js?v=20261117h';
 
-const APP_VERSION = '17 Nov 2026 (7)';
+const APP_VERSION = '17 Nov 2026 (8)';
 
 // ======================================================================
 // State & helpers
@@ -357,6 +357,7 @@ function render() {
     if (inp) { inp.value = S.chatDraft || ''; growChat(inp); if (typing) inp.focus(); }
     if (nearBottom || S.chatJump) { S.chatJump = false; requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight)); }
     markMessagesRead();
+    loadChatPhotoUrls();
   }
   document.body.classList.toggle('doc-mode', r.view === 'doc');
   after(r);
@@ -433,7 +434,8 @@ function chatView({ id }) {
     const time = new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     return `${sep}<div class="bubble ${mine ? 'mine' : 'theirs'}">
       ${j ? `<a class="bubble-job" href="#/job/${j.id}">${ICON.jobs}<span>${esc(jobName(j))}</span></a>` : ''}
-      <div class="bubble-text">${nl2br(m.text)}</div>
+      ${m.photo_path ? `<button class="bubble-photo" data-act="chatPhotoView" data-id="${m.id}">${S.urls[m.photo_path] ? `<img src="${esc(S.urls[m.photo_path])}" alt="Photo">` : `<span class="ph-load">${ICON.image}</span>`}</button>` : ''}
+      ${m.text ? `<div class="bubble-text">${nl2br(m.text)}</div>` : ''}
       <div class="bubble-meta">${time}${mine ? (m.read_at ? ' · Seen' : '') : ''}</div>
     </div>`;
   }).join('');
@@ -447,17 +449,45 @@ function chatView({ id }) {
   </div>
   <form data-form="chat" class="chat-compose">
     <div class="chat-quick">${QUICK_MSGS.map(q => `<button type="button" class="chip" data-act="chatQuick" data-t="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    ${S.chatPhoto ? `<div class="chat-photo-preview"><img src="${esc(S.chatPhoto.url)}" alt=""><span>Photo ready to send — add a message if you like</span><button type="button" data-act="chatPhotoClear" aria-label="Remove photo">×</button></div>` : ''}
     ${job ? `<div class="chat-job-tag">${ICON.jobs}<span>About: <b>${esc(jobName(job))}</b></span><button type="button" data-act="chatJobClear" aria-label="Remove job">×</button></div>` : ''}
     <div class="chat-row">
       <label class="chat-attach" aria-label="Link a job">${ICON.jobs}
         <select data-input="chatJob"><option value="">Link a job…</option>${jobs.map(j => `<option value="${j.id}" ${j.id === S.chatJob ? 'selected' : ''}>${esc(jobName(j))}${j.title && jobAddr(j) ? ` – ${esc(j.title)}` : ''}</option>`).join('')}</select>
       </label>
-      <textarea id="chat-input" name="text" rows="1" placeholder="Message ${esc(nameOf(other))}" data-input="chatDraft" enterkeyhint="send"></textarea>
+      <label class="chat-attach" aria-label="Add a photo">${ICON.camera}<input type="file" id="chat-photo" accept="image/*" class="file-hidden"></label>
+      <textarea id="chat-input" name="text" rows="1" placeholder="${S.chatPhoto ? 'Add a message (optional)' : `Message ${esc(nameOf(other))}`}" data-input="chatDraft" enterkeyhint="send"></textarea>
       <button class="chat-send" aria-label="Send">${ICON.send}</button>
     </div>
   </form>`;
   return layout({ title: nameOf(other), back: true, nav: false, body });
 }
+async function loadChatPhotoUrls() {
+  const need = (S.data.messages || []).map(m => m.photo_path).filter(p => p && !S.urls[p]);
+  if (!need.length) return;
+  try {
+    Object.assign(S.urls, await db.fileUrls([...new Set(need)]));
+    if (route().view === 'chat' && sheet.hidden) render();
+  } catch (e) { console.error(e); }
+}
+
+// Full-size view of a chat photo, with "add to the job's photos" when it's about a job
+function chatPhotoView(id) {
+  const m = (S.data.messages || []).find(x => x.id === id);
+  if (!m?.photo_path) return;
+  const j = m.job_id ? jobById(m.job_id) : null;
+  openSheet(`<div class="form">
+    ${sheetHead('Photo')}
+    <div class="photo-full">${S.urls[m.photo_path] ? `<img src="${esc(S.urls[m.photo_path])}" alt="">` : 'Loading…'}</div>
+    ${m.text ? `<p>${nl2br(m.text)}</p>` : ''}
+    <p class="muted small">From ${esc(m.to_who === S.me ? nameOf(otherOf(S.me)) : 'you')} · ${timeAgo(m.created_at)}</p>
+    <div class="btn-row wrap">
+      ${j ? `<button class="btn primary grow" data-act="chatPhotoToJob" data-id="${m.id}">${ICON.image} Add to ${esc(jobName(j))} photos</button>` : ''}
+      ${S.urls[m.photo_path] ? `<a class="btn grow" href="${esc(S.urls[m.photo_path])}" target="_blank" rel="noopener">Open full size</a>` : ''}
+    </div>
+  </div>`);
+}
+
 function growChat(el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }
 
 // New messages for me: banner at the top of Jobs until dismissed
@@ -469,7 +499,7 @@ function msgBannerHtml() {
   return `<section class="msg-banner">
     <div class="msg-banner-main">
       <b>${ICON.chat} ${esc(nameOf(otherOf(m.to_who)))}${list.length > 1 ? ` <span class="count">${list.length}</span>` : ''}</b>
-      <span class="msg-text">${nl2br(m.text)}</span>
+      <span class="msg-text">${m.photo_path ? '📷 ' : ''}${m.text ? nl2br(m.text) : 'Photo'}</span>
       <span class="muted small">${timeAgo(m.created_at)}${j ? ` · <a href="#/job/${j.id}" data-act="msgRead">${esc(jobName(j))}</a>` : ''}</span>
     </div>
     <div class="msg-banner-btns">
@@ -2294,19 +2324,27 @@ const FORMS = {
 
   async chat(fd, form) {
     const text = (S.chatDraft || fd.get('text') || '').trim();
-    if (!text) return;
+    const photo = S.chatPhoto;
+    if (!text && !photo) return;
     const btn = form.querySelector('.chat-send');
     btn.disabled = true;
     try {
-      const r = await db.sendMessage({ to_who: otherOf(S.me), text, job_id: S.chatJob || null });
+      let photo_path = null;
+      if (photo) {
+        btn.classList.add('busy');
+        photo_path = `chat/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        await db.upload(photo_path, photo.blob);
+        S.urls[photo_path] = photo.url; // show it straight away
+      }
+      const r = await db.sendMessage({ to_who: otherOf(S.me), text, job_id: S.chatJob || null, photo_path });
       S.data.messages = [r.saved, ...(S.data.messages || [])];
-      S.chatDraft = ''; S.chatJob = null; S.chatJump = true;
+      S.chatDraft = ''; S.chatJob = null; S.chatPhoto = null; S.chatJump = true;
       render();
       document.getElementById('chat-input')?.focus();
       const who = nameOf(otherOf(S.me));
       if (r.demo) toast('Demo: saved, nothing is sent');
       else if (!r.delivered) toast(r.phones ? `${who} has message pop-ups off — they'll see it in the app` : `${who} hasn't turned on notifications yet — they'll see it when they open the app`);
-    } catch (e) { toast(friendly(e), true); btn.disabled = false; }
+    } catch (e) { toast(friendly(e), true); btn.disabled = false; btn.classList.remove('busy'); }
   },
 
   async price(fd, form) {
@@ -2377,9 +2415,24 @@ const ACT = {
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   noteSheet(d) { noteSheet(d.id); },
-  msgSheet(d) { S.chatJump = true; go(d.job ? `#/chat/${d.job}` : '#/chat'); },
+  msgSheet(d) { S.chatJump = true; S.chatJob = d.job || null; go(d.job ? `#/chat/${d.job}` : '#/chat'); },
   chatQuick(d) { const i = document.getElementById('chat-input'); S.chatDraft = d.t; i.value = d.t; growChat(i); i.focus(); },
   chatJobClear() { S.chatJob = null; render(); },
+  chatPhotoClear() { if (S.chatPhoto?.url) URL.revokeObjectURL(S.chatPhoto.url); S.chatPhoto = null; render(); },
+  chatPhotoView(d) { chatPhotoView(d.id); },
+  async chatPhotoToJob(d, el) {
+    const m = (S.data.messages || []).find(x => x.id === d.id);
+    if (!m?.job_id) return;
+    await busy(el, async () => {
+      // Copy the picture into the job's photos (its own file, so deleting one never breaks the other)
+      const blob = await (await fetch(S.urls[m.photo_path])).blob();
+      const path = `${m.job_id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      await db.upload(path, blob);
+      const j = jobById(m.job_id);
+      await saveRow('photos', null, { job_id: m.job_id, path, kind: j.status === 'quoted' ? 'before' : j.status === 'finished' ? 'after' : 'during', caption: m.text || null });
+      closeSheet(); toast(`Added to ${jobName(j)} photos`);
+    });
+  },
   async msgRead() { await markMessagesRead(); render(); },
   pushRefresh() { refreshPush(); },
   async pushOn(d, el) {
@@ -2787,7 +2840,18 @@ document.addEventListener('submit', e => {
   FORMS[f.dataset.form](new FormData(f), f);
 });
 
-document.addEventListener('change', e => {
+document.addEventListener('change', async e => {
+  if (e.target.id === 'chat-photo' && e.target.files?.[0]) {
+    const f = e.target.files[0];
+    e.target.value = '';
+    try {
+      const blob = await compress(f);
+      if (S.chatPhoto?.url) URL.revokeObjectURL(S.chatPhoto.url);
+      S.chatPhoto = { blob, url: URL.createObjectURL(blob) };
+      render();
+    } catch (err) { toast(friendly(err), true); }
+    return;
+  }
   const jobId = e.target.dataset?.photoJob;
   if (!jobId || !e.target.files?.length) return;
   uploadPhotos(jobId, [...e.target.files], e.target);
