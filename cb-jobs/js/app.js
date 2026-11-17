@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261116d';
+import { db, DEMO } from './db.js?v=20261117a';
 
-const APP_VERSION = '16 Nov 2026 (4)';
+const APP_VERSION = '17 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -354,6 +354,7 @@ function render() {
 
 function after(r) {
   if (r.view === 'job') loadPhotoUrls(r.id);
+  if (r.view === 'settings' && S.push && S.push.status !== 'checking' && !S._pushChecked) { S._pushChecked = true; refreshPush(); }
   if (r.view === 'overheads') setTimeout(() => document.getElementById('overheads')?.scrollIntoView({ block: 'start' }), 0);
   if (r.view === 'calendar' && r.id && /^\d{4}-\d\d-\d\d$/.test(r.id)) {
     const el = document.getElementById(`d-${r.id}`);
@@ -1302,6 +1303,82 @@ function moneyView() {
 // ======================================================================
 // Settings
 // ======================================================================
+// ======================================================================
+// Phone notifications
+// ======================================================================
+const VAPID_PUBLIC_KEY = 'BMTzNUAP9jdgD0UhtQVx0efe7ZcLiSOyWzT60q3iVYNWnBs5ZnGyKchNYLaomToTjxFxRkYVcZvq6YuFG5un7PA';
+const PUSH_DEFAULTS = { morning: true, visits: true, jobs: true, money: true, changes: false };
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushCapable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const deviceName = () => (isIOS() ? 'iPhone' : /Android/i.test(navigator.userAgent) ? 'Android' : 'Computer');
+function b64ToBytes(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, ch => ch.charCodeAt(0));
+}
+async function swReg() {
+  return Promise.race([navigator.serviceWorker.ready, new Promise((_, rej) => setTimeout(() => rej(new Error('The app is still installing. Close it and open it again, then try once more.')), 8000))]);
+}
+
+// Works out this phone's notification state, then redraws the card
+async function refreshPush() {
+  const P = (S.push = { ...(S.push || {}), status: 'checking' });
+  try {
+    if (DEMO || !db.pushSupported) P.status = 'demo';
+    else if (!pushCapable()) P.status = isIOS() && !isStandalone() ? 'needs-install' : 'unsupported';
+    else if (Notification.permission === 'denied') P.status = 'blocked';
+    else {
+      const reg = await swReg();
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) P.status = 'off';
+      else {
+        let row = await db.pushGet(sub.endpoint);
+        if (!row) row = await db.pushSave(sub, PUSH_DEFAULTS, deviceName());
+        Object.assign(P, { status: 'on', endpoint: sub.endpoint, prefs: { ...PUSH_DEFAULTS, ...(row.prefs || {}) } });
+      }
+    }
+  } catch (e) { P.status = 'error'; P.error = e.message || String(e); }
+  const card = document.getElementById('notif-card');
+  if (card) card.innerHTML = notifCardHtml();
+}
+
+function notifCardHtml() {
+  const P = S.push || { status: 'checking' };
+  if (!S.push) setTimeout(refreshPush, 0);
+  let mine = null;
+  try { mine = localStorage.getItem('cb-me'); } catch { /* ignore */ }
+  const other = mine === 'a' ? nameOf('b') : mine === 'b' ? nameOf('a') : 'the other one of you';
+  const head = '<h3>Notifications</h3>';
+  const msg = {
+    checking: '<p class="muted small">Checking…</p>',
+    demo: '<p class="muted small">Phone notifications work once you\'re signed in to your real account (not in the demo).</p>',
+    'needs-install': '<p>To get notifications on iPhone, C&amp;B Jobs needs to be on your home screen. Open it from the <b>C&amp;B icon</b> (not Safari), then come back here.</p>',
+    unsupported: '<p class="muted small">This browser can\'t do notifications. On iPhone, add C&amp;B Jobs to your home screen and open it from there.</p>',
+    blocked: '<p>Notifications are blocked for C&amp;B Jobs on this phone. Turn them on in your phone\'s <b>Settings → Notifications → C&amp;B Jobs</b>, then reopen the app.</p>',
+    error: `<p class="muted small">Couldn't check notifications: ${esc(P.error || '')}</p><button class="btn" data-act="pushRefresh">Try again</button>`,
+  }[P.status];
+  if (msg) return head + msg;
+  if (P.status === 'off') {
+    return `${head}<p class="muted small">Get a nudge on this phone: an 8am summary of the day, a reminder an hour before quote visits, and more. You choose which.</p>
+      <button class="btn primary wide big" data-act="pushOn">Turn on notifications</button>`;
+  }
+  const row = (k, title, sub) => `<label class="switch-row"><span><b>${title}</b><em>${sub}</em></span>
+      <input type="checkbox" class="switch" data-input="pushPref" data-k="${k}" ${P.prefs?.[k] ? 'checked' : ''}></label>`;
+  return `${head}<p class="muted small">On for this phone. Each phone has its own switches.</p>
+    <div class="switches">
+      ${row('morning', 'Morning summary', '8am: today\'s visits, jobs, to-dos and money owed')}
+      ${row('visits', 'Visits & appointments', '1 hour before, with the address')}
+      ${row('jobs', 'Jobs starting tomorrow', '6pm the evening before')}
+      ${row('money', 'Money', 'Invoices going overdue (9am) · bills of £50+ due tomorrow (6pm)')}
+      ${row('changes', `When ${esc(other)} adds things`, 'New jobs, costs, payments, calendar entries and to-dos')}
+    </div>
+    <div class="btn-row wrap">
+      <button class="btn" data-act="pushTest">Send a test</button>
+      <button class="btn" data-act="pushOff">Turn off on this phone</button>
+    </div>`;
+}
+
 function settingsView() {
   const s = set();
   const v = k => esc(s[k] ?? '');
@@ -1333,6 +1410,7 @@ function settingsView() {
     </section>
     <button class="btn primary wide big">Save settings</button>
   </form>
+  <section class="card" id="notif-card">${notifCardHtml()}</section>
   <section class="card">
     <p class="muted small">Signed in as ${esc(S.session?.user?.email || '')}${S.live ? ' · <span class="live-dot"></span> live sync on' : ''}<br>App version ${APP_VERSION}</p>
     <div class="btn-row wrap">
@@ -1990,6 +2068,35 @@ const ACT = {
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   noteSheet(d) { noteSheet(d.id); },
+  pushRefresh() { refreshPush(); },
+  async pushOn(d, el) {
+    await busy(el, async () => {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { await refreshPush(); if (perm === 'denied') throw new Error('Notifications were blocked. Turn them on in your phone\'s Settings.'); return; }
+      const reg = await swReg();
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC_KEY) });
+      await db.pushSave(sub, PUSH_DEFAULTS, deviceName());
+      await refreshPush();
+      toast('Notifications on');
+    });
+  },
+  async pushOff(d, el) {
+    await busy(el, async () => {
+      const reg = await swReg();
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) { await db.pushRemove(sub.endpoint).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+      await refreshPush();
+      toast('Notifications off on this phone');
+    });
+  },
+  async pushTest(d, el) {
+    await busy(el, async () => {
+      const r = await db.pushTest(S.push?.endpoint);
+      if (!r?.results?.includes('sent')) throw new Error('The test didn\'t go through. Turn notifications off and on again.');
+      toast('Test sent: it should pop up in a few seconds');
+    });
+  },
   priceSheet(d) { priceSheet(d.id); },
   swapKind(d, el) {
     const f = el.closest('form');
@@ -2343,6 +2450,13 @@ document.addEventListener('input', e => {
   const k = e.target.dataset?.input;
   if (!k) return;
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
+  if (k === 'pushPref') {
+    const P = S.push;
+    if (P?.endpoint) {
+      P.prefs = { ...P.prefs, [e.target.dataset.k]: e.target.checked };
+      db.pushPrefs(P.endpoint, P.prefs).then(() => toast('Saved')).catch(err => { e.target.checked = !e.target.checked; toast(err.message, true); });
+    }
+  }
   if (k === 'segpick') { e.target.closest('.seg3').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target))); }
   if (k === 'noteSearch') { S.noteSearch = e.target.value; document.getElementById('notes-list').innerHTML = notesListHtml(); }
   if (k === 'archiveSearch') { S.archiveSearch = e.target.value; document.getElementById('archive-list').innerHTML = archiveListHtml(); }
@@ -2404,6 +2518,7 @@ window.addEventListener('online', () => {
 // Keep the app's files on the phone for instant, signal-free opening
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch { /* not allowed here (e.g. demo preview) */ }
+  try { navigator.serviceWorker?.addEventListener('message', e => { if (e.data?.goto) location.hash = e.data.goto; }); } catch { /* ignore */ }
 }
 
 async function start() {

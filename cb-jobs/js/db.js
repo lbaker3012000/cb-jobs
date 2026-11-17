@@ -1,5 +1,5 @@
 // Data layer: Supabase when configured, otherwise a local demo store.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261116d';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261117a';
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 const TABLES = ['jobs', 'costs', 'payments', 'photos'];
@@ -129,6 +129,35 @@ const remote = {
     if (!paths.length) return;
     const c = await client();
     check(await c.storage.from(BUCKET).remove(paths));
+  },
+  // ----- Phone notifications (one row per phone that has them turned on)
+  pushSupported: true,
+  async pushGet(endpoint) {
+    const c = await client();
+    const { data, error } = await c.from('push_subs').select('*').eq('endpoint', endpoint).maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+  async pushSave(sub, prefs, device) {
+    const c = await client();
+    const j = sub.toJSON();
+    const row = { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device, updated_at: new Date().toISOString() };
+    if (prefs) row.prefs = prefs;
+    return check(await c.from('push_subs').upsert(row, { onConflict: 'endpoint' }).select().single());
+  },
+  async pushPrefs(endpoint, prefs) {
+    const c = await client();
+    check(await c.from('push_subs').update({ prefs, updated_at: new Date().toISOString() }).eq('endpoint', endpoint));
+  },
+  async pushRemove(endpoint) {
+    const c = await client();
+    check(await c.from('push_subs').delete().eq('endpoint', endpoint));
+  },
+  async pushTest(endpoint) {
+    const c = await client();
+    const { data, error } = await c.functions.invoke('notify', { body: { test: true, endpoint } });
+    if (error) throw error;
+    return data;
   },
 };
 

@@ -710,3 +710,17 @@ html[data-theme="dark"] .big3 .change { color: var(--gold); }
 .seg3 label input { position: absolute; opacity: 0; pointer-events: none; }
 .seg3 label.on { background: var(--navy); border-color: var(--navy); color: var(--cream); }
 html[data-theme="dark"] .seg3 label.on { background: var(--gold); border-color: var(--gold); color: var(--navy); }
+
+/* Notification switches */
+.switches { margin: 6px 0 12px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); margin: 0; cursor: pointer; }
+.switch-row:last-child { border-bottom: 0; }
+.switch-row span { display: flex; flex-direction: column; }
+.switch-row b { font-weight: 600; font-size: .95rem; }
+.switch-row em { font-style: normal; color: var(--muted); font-size: .8rem; margin-top: 2px; }
+input.switch { -webkit-appearance: none; appearance: none; flex: none; width: 50px; height: 30px; border-radius: 999px; background: #d6d1c7; position: relative; cursor: pointer; transition: background .15s; margin: 0; border: 0; padding: 0; }
+input.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+input.switch:checked { background: var(--green-2); }
+input.switch:checked::after { transform: translateX(20px); }
+html[data-theme="dark"] input.switch { background: #2a4257; }
+html[data-theme="dark"] input.switch:checked { background: var(--green-2); }

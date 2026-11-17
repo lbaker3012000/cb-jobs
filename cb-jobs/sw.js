@@ -3,7 +3,7 @@
 // always comes live from Supabase (the app keeps its own last-loaded copy).
 //
 // When you update the app, bump VERSION (and the ?v= numbers in index.html).
-const VERSION = '20261116d';
+const VERSION = '20261117a';
 const CACHE = `cbjobs-${VERSION}`;
 
 const SHELL = [
@@ -69,4 +69,35 @@ self.addEventListener('fetch', event => {
       return res;
     })),
   );
+});
+
+// ----- Phone notifications
+self.addEventListener('push', event => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch { d = { body: event.data && event.data.text() }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'C&B Jobs', {
+    body: d.body || '',
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
+    tag: d.tag || undefined,
+    data: { url: d.url || '#/jobs' },
+  }));
+});
+
+// Tapping a notification opens the app on the right screen
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const hash = (event.notification.data && event.notification.data.url) || '#/jobs';
+  const target = new URL(self.registration.scope).href.split('#')[0] + hash;
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) {
+      if (w.url.startsWith(self.registration.scope)) {
+        await w.focus();
+        try { await w.navigate(target); } catch { w.postMessage({ goto: hash }); }
+        return;
+      }
+    }
+    await self.clients.openWindow(target);
+  })());
 });

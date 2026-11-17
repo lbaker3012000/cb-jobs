@@ -225,3 +225,38 @@ begin
     end;
   end loop;
 end $$;
+
+-- ============================================================
+-- Phone notifications (added 17 Nov 2026)
+-- The sender lives in supabase/functions/notify. Its keys are kept in
+-- app_secrets, which the app itself can never read.
+-- ============================================================
+alter table public.members add column if not exists who text check (who in ('a','b'));  -- a = Henry, b = Luke
+
+create table if not exists public.push_subs (
+  id uuid primary key default gen_random_uuid(),
+  email text not null default lower(auth.jwt() ->> 'email'),
+  who text check (who in ('a','b')),
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  prefs jsonb not null default '{"morning":true,"visits":true,"jobs":true,"money":true,"changes":false}',
+  device text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.push_subs enable row level security;
+drop policy if exists "own devices" on public.push_subs;
+create policy "own devices" on public.push_subs for all to authenticated
+  using (public.is_member() and lower(email) = lower(auth.jwt() ->> 'email'))
+  with check (public.is_member() and lower(email) = lower(auth.jwt() ->> 'email'));
+
+create table if not exists public.push_log (key text primary key, sent_at timestamptz not null default now());
+alter table public.push_log enable row level security;
+create table if not exists public.app_secrets (key text primary key, value text not null);
+alter table public.app_secrets enable row level security;
+
+alter table public.costs add column if not exists created_by text default lower(auth.jwt() ->> 'email');
+alter table public.payments add column if not exists created_by text default lower(auth.jwt() ->> 'email');
+alter table public.events add column if not exists created_by text default lower(auth.jwt() ->> 'email');
+-- The 15-minute schedule (pg_cron + pg_net) is created once in Supabase; see README.
