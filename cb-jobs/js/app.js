@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117f';
+import { db, DEMO } from './db.js?v=20261117g';
 
-const APP_VERSION = '17 Nov 2026 (6)';
+const APP_VERSION = '17 Nov 2026 (7)';
 
 // ======================================================================
 // State & helpers
@@ -96,6 +96,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>',
+  send: '<svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z"/></svg>',
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
@@ -345,10 +346,18 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView,
+    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView,
   };
+  const typing = r.view === 'chat' && document.activeElement?.id === 'chat-input';
+  const nearBottom = r.view !== 'chat' || (window.innerHeight + window.scrollY >= document.body.scrollHeight - 160);
   const v = (views[r.view] || jobsView)(r);
   app.innerHTML = v;
+  if (r.view === 'chat') {
+    const inp = document.getElementById('chat-input');
+    if (inp) { inp.value = S.chatDraft || ''; growChat(inp); if (typing) inp.focus(); }
+    if (nearBottom || S.chatJump) { S.chatJump = false; requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight)); }
+    markMessagesRead();
+  }
   document.body.classList.toggle('doc-mode', r.view === 'doc');
   after(r);
 }
@@ -391,7 +400,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
 // ======================================================================
 const otherOf = who => (who === 'a' ? 'b' : 'a');
 const unreadForMe = () => (S.data?.messages || []).filter(m => m.to_who === S.me && !m.read_at);
-const msgBtn = () => (S.data && !S.data.messagesMissing
+const msgBtn = () => (S.data && !S.data.messagesMissing && route().view !== 'chat'
   ? `<button class="icon-btn msg-btn" data-act="msgSheet" aria-label="Send a message">${ICON.chat}${unreadForMe().length ? '<i class="dot"></i>' : ''}</button>` : '');
 const timeAgo = iso => {
   const d = new Date(iso); const mins = Math.round((Date.now() - d) / 60000);
@@ -402,36 +411,54 @@ const timeAgo = iso => {
 };
 const QUICK_MSGS = ['On my way', 'Running 15 min late', 'Call me when you can', 'Can you pick up materials?', 'Done for the day'];
 
-function msgSheet(jobId) {
-  const to = otherOf(S.me);
+function chatView({ id }) {
+  if (S.data.messagesMissing) return layout({ title: 'Messages', back: true, nav: false, body: '<div class="empty">Messages need the database set up.</div>' });
+  if (id && jobById(id)) S.chatJob = id;
+  const other = otherOf(S.me);
+  const list = (S.data.messages || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  let lastDay = '';
+  const dayLabel = iso => {
+    const d = new Date(iso); const t = new Date();
+    const y = new Date(); y.setDate(t.getDate() - 1);
+    if (d.toDateString() === t.toDateString()) return 'Today';
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  };
+  const bubbles = list.map(m => {
+    const mine = m.to_who !== S.me;
+    const j = m.job_id ? jobById(m.job_id) : null;
+    const day = new Date(m.created_at).toDateString();
+    const sep = day !== lastDay ? `<div class="chat-day"><span>${dayLabel(m.created_at)}</span></div>` : '';
+    lastDay = day;
+    const time = new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `${sep}<div class="bubble ${mine ? 'mine' : 'theirs'}">
+      ${j ? `<a class="bubble-job" href="#/job/${j.id}">${ICON.jobs}<span>${esc(jobName(j))}</span></a>` : ''}
+      <div class="bubble-text">${nl2br(m.text)}</div>
+      <div class="bubble-meta">${time}${mine ? (m.read_at ? ' · Seen' : '') : ''}</div>
+    </div>`;
+  }).join('');
+  const job = S.chatJob ? jobById(S.chatJob) : null;
   const jobs = S.data.jobs.filter(j => j.status !== 'declined')
     .sort((a, b) => (a.status === 'finished') - (b.status === 'finished') || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)))
     .slice(0, 60);
-  const recent = (S.data.messages || []).slice(0, 8);
-  openSheet(`<form data-form="message" class="form">
-    ${sheetHead(`Message ${esc(nameOf(to))}`)}
-    <input type="hidden" name="to_who" value="${to}">
-    <div class="chips wrap quick-msgs">${QUICK_MSGS.map(q => `<button type="button" class="chip" data-act="quickMsg" data-t="${esc(q)}">${esc(q)}</button>`).join('')}</div>
-    <label>Message<textarea name="text" rows="3" required placeholder="Type a message for ${esc(nameOf(to))}…"></textarea></label>
-    <label>About a job <span class="muted small">(optional — tapping the message opens it)</span>
-      <select name="job_id"><option value="">No job</option>${jobs.map(j => `<option value="${j.id}" ${j.id === jobId ? 'selected' : ''}>${esc(jobName(j))}${j.title && jobAddr(j) ? ` – ${esc(j.title)}` : ''}</option>`).join('')}</select></label>
-    <button class="btn primary wide big">${ICON.chat} Send to ${esc(nameOf(to))}</button>
-    <p class="muted small">Pops up on ${esc(nameOf(to))}'s phone straight away (if they've turned notifications on).</p>
-    ${recent.length ? `<h4>Recent</h4><div class="msg-list">${recent.map(msgRowHtml).join('')}</div>` : ''}
-  </form>`);
-  setTimeout(() => sheet.querySelector('[name=text]')?.focus(), 60);
-  markMessagesRead();
+  const body = `
+  <div class="chat-thread">
+    ${bubbles || `<div class="chat-empty">${ICON.chat}<p>No messages yet.<br>Say hello to ${esc(nameOf(other))} — it pops up on their phone.</p></div>`}
+  </div>
+  <form data-form="chat" class="chat-compose">
+    <div class="chat-quick">${QUICK_MSGS.map(q => `<button type="button" class="chip" data-act="chatQuick" data-t="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    ${job ? `<div class="chat-job-tag">${ICON.jobs}<span>About: <b>${esc(jobName(job))}</b></span><button type="button" data-act="chatJobClear" aria-label="Remove job">×</button></div>` : ''}
+    <div class="chat-row">
+      <label class="chat-attach" aria-label="Link a job">${ICON.jobs}
+        <select data-input="chatJob"><option value="">Link a job…</option>${jobs.map(j => `<option value="${j.id}" ${j.id === S.chatJob ? 'selected' : ''}>${esc(jobName(j))}${j.title && jobAddr(j) ? ` – ${esc(j.title)}` : ''}</option>`).join('')}</select>
+      </label>
+      <textarea id="chat-input" name="text" rows="1" placeholder="Message ${esc(nameOf(other))}" data-input="chatDraft" enterkeyhint="send"></textarea>
+      <button class="chat-send" aria-label="Send">${ICON.send}</button>
+    </div>
+  </form>`;
+  return layout({ title: nameOf(other), back: true, nav: false, body });
 }
-
-function msgRowHtml(m) {
-  const mine = m.to_who !== S.me;
-  const j = m.job_id ? jobById(m.job_id) : null;
-  return `<div class="msg ${mine ? 'mine' : 'theirs'}">
-    <div class="msg-meta">${mine ? `You → ${esc(nameOf(m.to_who))}` : esc(nameOf(otherOf(m.to_who)))} · ${timeAgo(m.created_at)}</div>
-    <div class="msg-text">${nl2br(m.text)}</div>
-    ${j ? `<a class="msg-job" href="#/job/${j.id}">${esc(jobName(j))}</a>` : ''}
-  </div>`;
-}
+function growChat(el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }
 
 // New messages for me: banner at the top of Jobs until dismissed
 function msgBannerHtml() {
@@ -2265,16 +2292,21 @@ const FORMS = {
     });
   },
 
-  async message(fd, form) {
-    await busy(form.querySelector('button.primary'), async () => {
-      const text = (fd.get('text') || '').trim();
-      if (!text) throw new Error('Type a message first');
-      const r = await db.sendMessage({ to_who: fd.get('to_who'), text, job_id: nz(fd.get('job_id')) });
+  async chat(fd, form) {
+    const text = (S.chatDraft || fd.get('text') || '').trim();
+    if (!text) return;
+    const btn = form.querySelector('.chat-send');
+    btn.disabled = true;
+    try {
+      const r = await db.sendMessage({ to_who: otherOf(S.me), text, job_id: S.chatJob || null });
       S.data.messages = [r.saved, ...(S.data.messages || [])];
-      closeSheet(); render();
-      const who = nameOf(fd.get('to_who'));
-      toast(r.demo ? 'Saved (demo: nothing is sent)' : r.delivered ? `Sent to ${who} ✓` : r.phones ? `Saved — ${who} has message pop-ups turned off` : `Saved — ${who} hasn't turned on notifications yet, so it'll show when they open the app`);
-    });
+      S.chatDraft = ''; S.chatJob = null; S.chatJump = true;
+      render();
+      document.getElementById('chat-input')?.focus();
+      const who = nameOf(otherOf(S.me));
+      if (r.demo) toast('Demo: saved, nothing is sent');
+      else if (!r.delivered) toast(r.phones ? `${who} has message pop-ups off — they'll see it in the app` : `${who} hasn't turned on notifications yet — they'll see it when they open the app`);
+    } catch (e) { toast(friendly(e), true); btn.disabled = false; }
   },
 
   async price(fd, form) {
@@ -2345,8 +2377,9 @@ const ACT = {
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   noteSheet(d) { noteSheet(d.id); },
-  msgSheet(d) { msgSheet(d.job); },
-  quickMsg(d, el) { const t = el.closest('form').querySelector('[name=text]'); t.value = d.t; t.focus(); },
+  msgSheet(d) { S.chatJump = true; go(d.job ? `#/chat/${d.job}` : '#/chat'); },
+  chatQuick(d) { const i = document.getElementById('chat-input'); S.chatDraft = d.t; i.value = d.t; growChat(i); i.focus(); },
+  chatJobClear() { S.chatJob = null; render(); },
   async msgRead() { await markMessagesRead(); render(); },
   pushRefresh() { refreshPush(); },
   async pushOn(d, el) {
@@ -2763,6 +2796,7 @@ document.addEventListener('change', e => {
 // To-do steps: Enter adds the step; ticking strikes it through
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'step-new') { e.preventDefault(); ACT.stepAdd({}, e.target); }
+  if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'chat-input' && !/iPhone|iPad|Android/.test(navigator.userAgent)) { e.preventDefault(); e.target.form.requestSubmit(); }
 });
 document.addEventListener('change', e => {
   if (e.target.name === 'step_done') e.target.closest('.step-row')?.classList.toggle('done', e.target.checked);
@@ -2774,6 +2808,8 @@ document.addEventListener('input', e => {
   const k = e.target.dataset?.input;
   if (!k) return;
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
+  if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
+  if (k === 'chatJob') { S.chatJob = e.target.value || null; render(); }
   if (k === 'pushPref') {
     const P = S.push;
     if (P?.endpoint) {
