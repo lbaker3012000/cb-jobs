@@ -1,5 +1,5 @@
 // Data layer: Supabase when configured, otherwise a local demo store.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261117d';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261117e';
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 const TABLES = ['jobs', 'costs', 'payments', 'photos'];
@@ -74,6 +74,8 @@ const remote = {
       fetchAll(c, 'events'),
       fetchAll(c, 'tasks'),
       fetchAll(c, 'notes'),
+      c.from('messages').select('*').order('created_at', { ascending: false }).limit(100),
+      c.from('members').select('email, who'),
     ]);
     TABLES.forEach((t, i) => { out[t] = check(results[i]); });
     const s = check(results[TABLES.length]);
@@ -93,6 +95,12 @@ const remote = {
     const nt = results[TABLES.length + 4];
     out.notes = nt.error ? [] : nt.data;
     out.notesMissing = !!nt.error;
+    // Messages and the member list are optional too
+    const ms = results[TABLES.length + 5];
+    out.messages = ms.error ? [] : ms.data;
+    out.messagesMissing = !!ms.error;
+    const mb = results[TABLES.length + 6];
+    out.members = mb.error ? [] : mb.data;
     out.settingsMissing = !s.length;
     out.settings = s[0]?.data || {};
     return out;
@@ -153,6 +161,12 @@ const remote = {
     const c = await client();
     check(await c.from('push_subs').delete().eq('endpoint', endpoint));
   },
+  async sendMessage(row) {
+    const c = await client();
+    const saved = check(await c.from('messages').insert(row).select().single());
+    const { data, error } = await c.functions.invoke('notify', { body: { message_id: saved.id } });
+    return { saved, delivered: error ? 0 : data?.delivered || 0, phones: error ? 0 : data?.phones || 0, error: error?.message };
+  },
   async pushTest(endpoint) {
     const c = await client();
     const { data, error } = await c.functions.invoke('notify', { body: { test: true, endpoint } });
@@ -168,7 +182,7 @@ function readStore() {
     const s = JSON.parse(localStorage.getItem(KEY));
     if (s && s.jobs) return s;
   } catch { /* ignore */ }
-  return { jobs: [], costs: [], payments: [], photos: [], overheads: [], events: [], tasks: [], notes: [], settings: {}, files: {} };
+  return { jobs: [], costs: [], payments: [], photos: [], overheads: [], events: [], tasks: [], notes: [], messages: [], settings: {}, files: {} };
 }
 function writeStore(s) {
   try { localStorage.setItem(KEY, JSON.stringify(s)); }
@@ -206,8 +220,14 @@ const local = {
   async loadAll() {
     const s = readStore();
     const out = { settings: s.settings || {}, settingsMissing: false };
-    [...TABLES, 'overheads', 'events', 'tasks', 'notes'].forEach(t => { out[t] = structuredClone(s[t] || []); });
+    [...TABLES, 'overheads', 'events', 'tasks', 'notes', 'messages'].forEach(t => { out[t] = structuredClone(s[t] || []); });
+    out.messages.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    out.members = [];
     return out;
+  },
+  async sendMessage(row) {
+    const saved = await this.insert('messages', { from_email: 'demo@local', read_at: null, ...row });
+    return { saved, delivered: 0, phones: 0, demo: true };
   },
   async insert(table, row) {
     const s = readStore();

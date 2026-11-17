@@ -2,7 +2,7 @@
 // Pure functions (no network) so they can be tested on their own.
 
 export const NAMES = { a: 'Henry', b: 'Luke' };
-export const DEFAULT_PREFS = { morning: true, visits: true, jobs: true, money: true, changes: false };
+export const DEFAULT_PREFS = { morning: true, visits: true, jobs: true, money: true, changes: false, messages: true };
 
 const pad = n => String(n).padStart(2, '0');
 const toISO = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;

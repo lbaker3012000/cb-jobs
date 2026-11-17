@@ -264,3 +264,20 @@ alter table public.events add column if not exists created_by text default lower
 -- To-dos: due dates and multi-step lists (added 17 Nov 2026)
 alter table public.tasks add column if not exists due_date date;
 alter table public.tasks add column if not exists steps jsonb;  -- null = quick to-do; [{id,text,done,done_at}] = multi-step
+
+-- Messages between Henry and Luke (added 17 Nov 2026)
+drop policy if exists "members can read members" on public.members;
+create policy "members can read members" on public.members for select to authenticated using (public.is_member());
+create table if not exists public.messages (
+  id uuid primary key default gen_random_uuid(),
+  from_email text not null default lower(auth.jwt() ->> 'email'),
+  to_who text not null check (to_who in ('a','b')),
+  text text not null check (length(trim(text)) > 0),
+  job_id uuid references public.jobs(id) on delete set null,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists messages_created_idx on public.messages (created_at desc);
+alter table public.messages enable row level security;
+drop policy if exists "members only" on public.messages;
+create policy "members only" on public.messages for all to authenticated using (public.is_member()) with check (public.is_member());

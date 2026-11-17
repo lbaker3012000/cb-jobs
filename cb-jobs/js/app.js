@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117d';
+import { db, DEMO } from './db.js?v=20261117e';
 
-const APP_VERSION = '17 Nov 2026 (4)';
+const APP_VERSION = '17 Nov 2026 (5)';
 
 // ======================================================================
 // State & helpers
@@ -96,6 +96,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>',
+  chat: '<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z"/></svg>',
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
   note: '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>',
@@ -369,7 +370,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   <header class="top">
     ${back ? `<button class="icon-btn" data-act="back" aria-label="Back">${ICON.back}</button>` : '<div class="brand"><img class="brand-mark" src="img/house-gold.png" alt=""><span class="wordmark">C<i>&amp;</i>B</span></div>'}
     <h1>${esc(title)}</h1>
-    <div class="top-right">${right}${themeSwitch()}</div>
+    <div class="top-right">${right}${msgBtn()}${themeSwitch()}</div>
   </header>
   ${S.offlineSince ? `<div class="offline-banner"><b>No signal</b> — showing jobs as of ${new Date(S.offlineSince).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}. You can look, but changes can't be saved until you're back online.</div>` : ''}
   ${DEMO ? '<div class="demo-banner"><b>Demo</b> — sample jobs to try out. Changes stay on this phone only.</div>' : ''}
@@ -383,6 +384,79 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
     ${tab('money', 'Money', ICON.money)}
     ${tab('settings', 'Settings', ICON.cog)}
   </nav>` : ''}`;
+}
+
+// ======================================================================
+// Messages between Henry and Luke (pop up on the other phone)
+// ======================================================================
+const otherOf = who => (who === 'a' ? 'b' : 'a');
+const unreadForMe = () => (S.data?.messages || []).filter(m => m.to_who === S.me && !m.read_at);
+const msgBtn = () => (S.data && !S.data.messagesMissing
+  ? `<button class="icon-btn msg-btn" data-act="msgSheet" aria-label="Send a message">${ICON.chat}${unreadForMe().length ? '<i class="dot"></i>' : ''}</button>` : '');
+const timeAgo = iso => {
+  const d = new Date(iso); const mins = Math.round((Date.now() - d) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+};
+const QUICK_MSGS = ['On my way', 'Running 15 min late', 'Call me when you can', 'Can you pick up materials?', 'Done for the day'];
+
+function msgSheet(jobId) {
+  const to = otherOf(S.me);
+  const jobs = S.data.jobs.filter(j => j.status !== 'declined')
+    .sort((a, b) => (a.status === 'finished') - (b.status === 'finished') || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)))
+    .slice(0, 60);
+  const recent = (S.data.messages || []).slice(0, 8);
+  openSheet(`<form data-form="message" class="form">
+    ${sheetHead(`Message ${esc(nameOf(to))}`)}
+    <input type="hidden" name="to_who" value="${to}">
+    <div class="chips wrap quick-msgs">${QUICK_MSGS.map(q => `<button type="button" class="chip" data-act="quickMsg" data-t="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    <label>Message<textarea name="text" rows="3" required placeholder="Type a message for ${esc(nameOf(to))}…"></textarea></label>
+    <label>About a job <span class="muted small">(optional — tapping the message opens it)</span>
+      <select name="job_id"><option value="">No job</option>${jobs.map(j => `<option value="${j.id}" ${j.id === jobId ? 'selected' : ''}>${esc(jobName(j))}${j.title && jobAddr(j) ? ` – ${esc(j.title)}` : ''}</option>`).join('')}</select></label>
+    <button class="btn primary wide big">${ICON.chat} Send to ${esc(nameOf(to))}</button>
+    <p class="muted small">Pops up on ${esc(nameOf(to))}'s phone straight away (if they've turned notifications on).</p>
+    ${recent.length ? `<h4>Recent</h4><div class="msg-list">${recent.map(msgRowHtml).join('')}</div>` : ''}
+  </form>`);
+  setTimeout(() => sheet.querySelector('[name=text]')?.focus(), 60);
+  markMessagesRead();
+}
+
+function msgRowHtml(m) {
+  const mine = m.to_who !== S.me;
+  const j = m.job_id ? jobById(m.job_id) : null;
+  return `<div class="msg ${mine ? 'mine' : 'theirs'}">
+    <div class="msg-meta">${mine ? `You → ${esc(nameOf(m.to_who))}` : esc(nameOf(otherOf(m.to_who)))} · ${timeAgo(m.created_at)}</div>
+    <div class="msg-text">${nl2br(m.text)}</div>
+    ${j ? `<a class="msg-job" href="#/job/${j.id}">${esc(jobName(j))}</a>` : ''}
+  </div>`;
+}
+
+// New messages for me: banner at the top of Jobs until dismissed
+function msgBannerHtml() {
+  const list = unreadForMe();
+  if (!list.length) return '';
+  const m = list[0];
+  const j = m.job_id ? jobById(m.job_id) : null;
+  return `<section class="msg-banner">
+    <div class="msg-banner-main">
+      <b>${ICON.chat} ${esc(nameOf(otherOf(m.to_who)))}${list.length > 1 ? ` <span class="count">${list.length}</span>` : ''}</b>
+      <span class="msg-text">${nl2br(m.text)}</span>
+      <span class="muted small">${timeAgo(m.created_at)}${j ? ` · <a href="#/job/${j.id}" data-act="msgRead">${esc(jobName(j))}</a>` : ''}</span>
+    </div>
+    <div class="msg-banner-btns">
+      <button class="btn small primary" data-act="msgSheet">Reply</button>
+      <button class="btn small" data-act="msgRead">OK</button>
+    </div>
+  </section>`;
+}
+
+async function markMessagesRead() {
+  const list = unreadForMe();
+  if (!list.length) return;
+  const at = new Date().toISOString();
+  for (const m of list) { try { await saveRow('messages', m.id, { read_at: at }); } catch { /* try again next time */ } }
 }
 
 // Dark mode: remembered on each phone
@@ -448,6 +522,7 @@ function jobsView() {
     <button data-act="filter" data-f="owed" class="${unpaid.length ? 'warn' : ''}"><b>${money0(sum(unpaid.map(j => calc(j).balance)))}</b><span>owed to you</span></button>
   </div>
   ${stripHtml()}
+  ${msgBannerHtml()}
   ${todoHtml()}
   <h2 class="section-title">Jobs</h2>
   <div class="toolbar">
@@ -750,6 +825,7 @@ function overviewTab(j, c) {
     <a class="btn" href="#/doc/${j.id}/invoice">Invoice PDF</a>
     ${S.data.eventsMissing ? '' : `<button class="btn" data-act="evSheet" data-job="${j.id}">+ Calendar</button>`}
     <button class="btn" data-act="duplicate" data-id="${j.id}">Duplicate</button>
+    ${S.data.messagesMissing ? '' : `<button class="btn" data-act="msgSheet" data-job="${j.id}">${ICON.chat} Message ${esc(nameOf(otherOf(S.me)))}</button>`}
   </div>
   <button class="link-btn danger-link" data-act="deleteJob" data-id="${j.id}">Delete this job</button>`;
 }
@@ -1410,7 +1486,7 @@ function moneyView() {
 // Phone notifications
 // ======================================================================
 const VAPID_PUBLIC_KEY = 'BMTzNUAP9jdgD0UhtQVx0efe7ZcLiSOyWzT60q3iVYNWnBs5ZnGyKchNYLaomToTjxFxRkYVcZvq6YuFG5un7PA';
-const PUSH_DEFAULTS = { morning: true, visits: true, jobs: true, money: true, changes: false };
+const PUSH_DEFAULTS = { morning: true, visits: true, jobs: true, money: true, changes: false, messages: true };
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
 const pushCapable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -1470,6 +1546,7 @@ function notifCardHtml() {
       <input type="checkbox" class="switch" data-input="pushPref" data-k="${k}" ${P.prefs?.[k] ? 'checked' : ''}></label>`;
   return `${head}<p class="muted small">On for this phone. Each phone has its own switches.</p>
     <div class="switches">
+      ${row('messages', `Messages from ${esc(other === 'the other one of you' ? 'each other' : other)}`, 'Pops up as soon as it\'s sent')}
       ${row('morning', 'Morning summary', '8am: today\'s visits, jobs, to-dos and money owed')}
       ${row('visits', 'Visits & appointments', '1 hour before, with the address')}
       ${row('jobs', 'Jobs starting tomorrow', '6pm the evening before')}
@@ -1991,6 +2068,12 @@ async function loadData() {
   }
   S.loadedAt = Date.now();
   S.me = getMe();
+  // Work out whose phone this is from the login, the first time
+  try {
+    const email = String(S.session?.user?.email || '').toLowerCase();
+    const m = (S.data.members || []).find(x => String(x.email).toLowerCase() === email);
+    if (m?.who && !localStorage.getItem('cb-me')) setMe(m.who);
+  } catch { /* ignore */ }
 }
 // Who's using this phone: remembered from the last time they picked themselves
 function getMe() { try { return localStorage.getItem('cb-me') === 'b' ? 'b' : 'a'; } catch { return 'a'; } }
@@ -2177,6 +2260,18 @@ const FORMS = {
     });
   },
 
+  async message(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      const text = (fd.get('text') || '').trim();
+      if (!text) throw new Error('Type a message first');
+      const r = await db.sendMessage({ to_who: fd.get('to_who'), text, job_id: nz(fd.get('job_id')) });
+      S.data.messages = [r.saved, ...(S.data.messages || [])];
+      closeSheet(); render();
+      const who = nameOf(fd.get('to_who'));
+      toast(r.demo ? 'Saved (demo: nothing is sent)' : r.delivered ? `Sent to ${who} ✓` : r.phones ? `Saved — ${who} has message pop-ups turned off` : `Saved — ${who} hasn't turned on notifications yet, so it'll show when they open the app`);
+    });
+  },
+
   async price(fd, form) {
     await busy(form.querySelector('button.primary'), async () => {
       const v = fd.get('price');
@@ -2245,6 +2340,9 @@ const ACT = {
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   noteSheet(d) { noteSheet(d.id); },
+  msgSheet(d) { msgSheet(d.job); },
+  quickMsg(d, el) { const t = el.closest('form').querySelector('[name=text]'); t.value = d.t; t.focus(); },
+  async msgRead() { await markMessagesRead(); render(); },
   pushRefresh() { refreshPush(); },
   async pushOn(d, el) {
     await busy(el, async () => {

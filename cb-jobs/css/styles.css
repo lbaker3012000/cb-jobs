@@ -757,3 +757,24 @@ button.card.choose { width: 100%; text-align: left; font: inherit; cursor: point
 .next-step.waiting em { color: #8a5a1c; font-weight: 600; }
 html[data-theme="dark"] .next-step.waiting em { color: #e9bf7f; }
 .next-step .btn-row { display: flex; gap: 6px; flex: none; }
+
+/* Messages between Henry and Luke */
+.msg-btn { position: relative; color: var(--cream); }
+.msg-btn svg { width: 22px; height: 22px; }
+.msg-btn .dot { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: #e8806f; box-shadow: 0 0 0 2px var(--navy); }
+.quick-msgs { margin-bottom: 8px; }
+.msg-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.msg { padding: 8px 12px; border-radius: 14px; max-width: 88%; background: var(--green-soft); }
+.msg.mine { align-self: flex-end; background: var(--navy); color: var(--cream); }
+.msg.mine .msg-meta { color: rgba(247,243,236,.65); }
+.msg.mine .msg-job { color: var(--gold); }
+.msg-meta { font-size: .72rem; color: var(--muted); margin-bottom: 2px; }
+.msg-text { display: block; }
+.msg-job { display: inline-block; font-size: .78rem; margin-top: 4px; }
+.msg-banner { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; background: var(--card); border: 2px solid var(--gold); border-radius: 16px; padding: 12px 14px; margin-bottom: 12px; }
+.msg-banner-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.msg-banner-main b { display: flex; align-items: center; gap: 6px; }
+.msg-banner-main b svg { width: 18px; height: 18px; color: var(--gold-deep); }
+.msg-banner-btns { display: flex; flex-direction: column; gap: 6px; flex: none; }
+html[data-theme="dark"] .msg.mine { background: #1d3a55; }
+html[data-theme="dark"] .msg-banner-main b svg { color: var(--gold); }

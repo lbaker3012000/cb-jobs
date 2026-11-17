@@ -1,6 +1,6 @@
 // C&B Jobs: sends phone notifications.
 // Called every 15 minutes by a schedule in the database (with a shared secret),
-// or by a signed-in member to send themselves a test notification.
+// or by a signed-in member to send a message to their partner, or a test notification.
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { dueNotifications, londonNow, NAMES } from './logic.js';
@@ -48,11 +48,39 @@ Deno.serve(async req => {
     webpush.setVapidDetails(s.vapid_subject, s.vapid_public, s.vapid_private);
     const body = await req.json().catch(() => ({}));
 
-    // A member asking for a test notification on their own phones
     const auth = req.headers.get('Authorization') || '';
-    if (body.test) {
+    const userEmail = async () => {
       const { data: u } = await db.auth.getUser(auth.replace(/^Bearer\s+/i, ''));
-      const email = u?.user?.email?.toLowerCase();
+      return u?.user?.email?.toLowerCase() || null;
+    };
+
+    // A message from Henry to Luke (or the other way): deliver it now
+    if (body.message_id) {
+      const email = await userEmail();
+      if (!email) return json({ error: 'Not signed in' }, 401);
+      const { data: msg } = await db.from('messages').select('*').eq('id', body.message_id).maybeSingle();
+      if (!msg || String(msg.from_email).toLowerCase() !== email) return json({ error: 'Message not found' }, 404);
+      const members = (await all('members', 'email, who')) as any[];
+      const fromWho = members.find(m => String(m.email).toLowerCase() === email)?.who;
+      const toEmails = members.filter(m => m.who === msg.to_who).map(m => String(m.email).toLowerCase());
+      const { data: subs } = await db.from('push_subs').select('*');
+      let job: any = null;
+      if (msg.job_id) job = (await db.from('jobs').select('id, address, title').eq('id', msg.job_id).maybeSingle()).data;
+      const jobLabel = job ? (String(job.address || '').split('\n').map((x: string) => x.trim()).filter(Boolean).join(', ') || job.title) : '';
+      const title = `Message from ${fromWho ? NAMES[fromWho as 'a' | 'b'] : email.split('@')[0]}${jobLabel ? ` · ${jobLabel}` : ''}`;
+      let delivered = 0, phones = 0;
+      for (const sub of (subs || []) as any[]) {
+        if (!toEmails.includes(String(sub.email).toLowerCase())) continue;
+        phones++;
+        if (sub.prefs && sub.prefs.messages === false) continue;
+        if ((await send(sub, { title, body: msg.text, url: job ? `#/job/${job.id}` : '#/jobs', tag: `msg:${msg.id}` })) === 'sent') delivered++;
+      }
+      return json({ delivered, phones });
+    }
+
+    // A member asking for a test notification on their own phones
+    if (body.test) {
+      const email = await userEmail();
       if (!email) return json({ error: 'Not signed in' }, 401);
       const { data: subs } = await db.from('push_subs').select('*').ilike('email', email);
       const results = [];
