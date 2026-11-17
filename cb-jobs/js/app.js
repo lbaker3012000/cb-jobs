@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117l';
+import { db, DEMO } from './db.js?v=20261117m';
 
-const APP_VERSION = '17 Nov 2026 (12)';
+const APP_VERSION = '17 Nov 2026 (13)';
 
 // ======================================================================
 // State & helpers
@@ -2096,7 +2096,10 @@ function overheadsBody() {
 
   // bills coming up in the next 60 days
   const horizon = addDays(t, 60);
-  const upcoming = list.flatMap(o => ohDueDates(o, t, horizon).map(d => ({ d, o }))).sort((a, b) => a.d.localeCompare(b.d));
+  // Only bills still to pay: regular ones (Checkatrade, insurance…) and one-offs dated in the future.
+  // Tool and van-stock buys are already paid, so they never show here.
+  const isBill = o => o.category !== 'tools' && o.category !== 'vanstock' && (o.frequency !== 'oneoff' || o.start_date > t);
+  const upcoming = list.filter(isBill).flatMap(o => ohDueDates(o, t, horizon).map(d => ({ d, o }))).sort((a, b) => a.d.localeCompare(b.d));
   const undated = live.filter(o => !o.start_date);
   const upTotal = sum(upcoming.map(u => num(u.o.amount)));
 
@@ -2142,7 +2145,8 @@ function overheadsBody() {
         <span class="bill-l"><b class="bill-date">${fmtDate(u.d, { weekday: 'short', day: 'numeric', month: 'short' })}</b><span>${esc(u.o.name)}</span></span>
         <span class="bill-r"><b>${money(u.o.amount)}</b><span class="who ${u.o.paid_by}">${u.o.paid_by === 'split' ? 'Split' : esc(nameOf(u.o.paid_by))}</span></span></button>`).join('')
       + `<div class="kv total"><span>Total</span><b>${money(upTotal)}</b></div>`
-      : '<p class="muted small">Nothing due in the next 60 days.</p>'}
+      : `<p class="muted small">No bills due in the next 60 days. Add regular payments like Checkatrade, insurance or phone as monthly / yearly bills and they'll show here before they go out.</p>
+         <button class="btn small" data-act="ohSheet">${ICON.plus} Add a regular bill</button>`}
     ${undated.length ? `<p class="muted small">${undated.length} bill${undated.length === 1 ? ' has' : 's have'} no start date, so can't be put on the calendar — tap ${undated.length === 1 ? 'it' : 'them'} below to add one.</p>` : ''}
   </section>
 
