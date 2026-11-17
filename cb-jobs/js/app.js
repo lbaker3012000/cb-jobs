@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117e';
+import { db, DEMO } from './db.js?v=20261117f';
 
-const APP_VERSION = '17 Nov 2026 (5)';
+const APP_VERSION = '17 Nov 2026 (6)';
 
 // ======================================================================
 // State & helpers
@@ -1525,8 +1525,8 @@ async function refreshPush() {
 function notifCardHtml() {
   const P = S.push || { status: 'checking' };
   if (!S.push) setTimeout(refreshPush, 0);
-  let mine = null;
-  try { mine = localStorage.getItem('cb-me'); } catch { /* ignore */ }
+  let mine = S.meKnown ? S.me : null;
+  if (!mine) { try { mine = localStorage.getItem('cb-me'); } catch { /* ignore */ } }
   const other = mine === 'a' ? nameOf('b') : mine === 'b' ? nameOf('a') : 'the other one of you';
   const head = '<h3>Notifications</h3>';
   const msg = {
@@ -1592,7 +1592,7 @@ function settingsView() {
   </form>
   <section class="card" id="notif-card">${notifCardHtml()}</section>
   <section class="card">
-    <p class="muted small">Signed in as ${esc(S.session?.user?.email || '')}${S.live ? ' · <span class="live-dot"></span> live sync on' : ''}<br>App version ${APP_VERSION}</p>
+    <p class="muted small">Signed in as ${S.meKnown ? `<b>${esc(nameOf(S.me))}</b> · ` : ''}${esc(S.session?.user?.email || '')}${S.live ? ' · <span class="live-dot"></span> live sync on' : ''}<br>App version ${APP_VERSION}</p>
     <div class="btn-row wrap">
       ${DEMO ? '' : '<button class="btn" data-act="changePw">Change password</button>'}
       ${DEMO ? '<button class="btn" data-act="seed">Load sample jobs</button><button class="btn danger" data-act="resetDemo">Wipe demo data</button>' : '<button class="btn" data-act="signout">Sign out</button>'}
@@ -1774,7 +1774,7 @@ function overheadsBody() {
 
 function ohSheet(id, preset) {
   const x = id ? (S.data.overheads || []).find(o => o.id === id)
-    : { frequency: 'monthly', category: 'other', paid_by: S.me, start_date: today(), ...(preset || {}) };
+    : { frequency: 'monthly', category: 'other', paid_by: S.payer || S.me, start_date: today(), ...(preset || {}) };
   if (!x) return;
   const v = k => esc(x[k] ?? '');
   if (isTool(x)) {
@@ -1944,7 +1944,7 @@ const whoOpts = sel => opts({ a: nameOf('a'), b: nameOf('b') }, sel);
 const sheetHead = (title, id, table) => `<div class="sheet-head"><h3>${title}</h3>${id ? `<button type="button" class="btn small danger" data-act="deleteRow" data-table="${table}" data-id="${id}">Delete</button>` : ''}<button type="button" class="btn small" data-act="closeSheet">Close</button></div>`;
 
 function costSheet(jobId, id, keep) {
-  const x = id ? S.data.costs.find(c => c.id === id) : { qty: 1, category: 'materials', paid_by: S.me, cost_date: today(), ...(keep || {}) };
+  const x = id ? S.data.costs.find(c => c.id === id) : { qty: 1, category: 'materials', paid_by: S.payer || S.me, cost_date: today(), ...(keep || {}) };
   const items = pastItems().slice(0, 300);
   const v = k => esc(x[k] ?? '');
   const suppliers = [...new Set(S.data.costs.map(c => c.supplier).filter(Boolean))].slice(0, 30);
@@ -1977,7 +1977,7 @@ function paySheet(jobId, id) {
   const c = calc(j);
   const x = id ? S.data.payments.find(p => p.id === id) : {
     kind: c.paid ? (c.balance > 0 && j.status === 'finished' ? 'final' : 'stage') : 'deposit',
-    method: 'bank', received_by: S.me, pay_date: today(),
+    method: 'bank', received_by: S.payer || S.me, pay_date: today(),
     amount: c.balance > 0 ? r2(c.balance) : '',
   };
   const v = k => esc(x[k] ?? '');
@@ -2068,16 +2068,21 @@ async function loadData() {
   }
   S.loadedAt = Date.now();
   S.me = getMe();
-  // Work out whose phone this is from the login, the first time
+  S.meKnown = false;
+  // Whose phone this is comes from the login (Henry's email = Henry), not from "Paid by" picks
   try {
     const email = String(S.session?.user?.email || '').toLowerCase();
     const m = (S.data.members || []).find(x => String(x.email).toLowerCase() === email);
-    if (m?.who && !localStorage.getItem('cb-me')) setMe(m.who);
+    if (m?.who) { setMe(m.who); S.meKnown = true; }
   } catch { /* ignore */ }
+  S.payer = getPayer();
 }
 // Who's using this phone: remembered from the last time they picked themselves
 function getMe() { try { return localStorage.getItem('cb-me') === 'b' ? 'b' : 'a'; } catch { return 'a'; } }
 function setMe(p) { if (p !== 'a' && p !== 'b') return; S.me = p; try { localStorage.setItem('cb-me', p); } catch { /* ignore */ } }
+// Default for "Paid by" / "Received by": whoever was picked last on this phone (starts as the phone's owner)
+function getPayer() { try { const v = localStorage.getItem('cb-payer'); return v === 'a' || v === 'b' ? v : S.me; } catch { return S.me; } }
+function setPayer(p) { if (p !== 'a' && p !== 'b') return; S.payer = p; try { localStorage.setItem('cb-payer', p); } catch { /* ignore */ } }
 
 const FORMS = {
   async login(fd, form) {
@@ -2155,7 +2160,7 @@ const FORMS = {
         supplier: nz(fd.get('supplier')?.trim()),
         cost_date: nz(fd.get('cost_date')),
       });
-      if (!fd.get('id')) setMe(fd.get('paid_by'));
+      if (!fd.get('id')) setPayer(fd.get('paid_by'));
       const again = form.dataset.again === '1';
       closeSheet(); render(); toast('Cost saved');
       if (again) costSheet(fd.get('job_id'), null, { paid_by: fd.get('paid_by'), supplier: fd.get('supplier') || '', cost_date: fd.get('cost_date'), category: fd.get('category') });
@@ -2173,7 +2178,7 @@ const FORMS = {
         received_by: fd.get('received_by'),
         note: nz(fd.get('note')?.trim()),
       });
-      if (!fd.get('id')) setMe(fd.get('received_by'));
+      if (!fd.get('id')) setPayer(fd.get('received_by'));
       closeSheet(); render(); toast('Payment saved');
     });
   },
@@ -2426,7 +2431,7 @@ const ACT = {
   photoKind(d) { (S.photoKind ||= {})[d.id] = d.k; render(); },
   viewPhoto(d) { viewPhoto(d.id); },
   ohSheet(d) { ohSheet(d.id); },
-  toolSheet() { ohSheet(null, { frequency: 'oneoff', category: 'tools', paid_by: S.me }); },
+  toolSheet() { ohSheet(null, { frequency: 'oneoff', category: 'tools', paid_by: S.payer || S.me }); },
   toggleTools() { S.showAllTools = !S.showAllTools; render(); },
   taskSheet(d) { taskSheet(d.id); },
   taskKind(d) { taskSheet(null, d.k); },
@@ -2480,9 +2485,9 @@ const ACT = {
     const j = jobById(d.id);
     const c = calc(j);
     if (c.balance <= 0.004) return;
-    if (!await ask(`Record a final payment of ${money(c.balance)} received by ${nameOf(S.me)} today?`)) return;
+    if (!await ask(`Record a final payment of ${money(c.balance)} received by ${nameOf(S.payer || S.me)} today?`)) return;
     await busy(el, async () => {
-      await saveRow('payments', null, { job_id: j.id, amount: r2(c.balance), pay_date: today(), kind: 'final', method: 'bank', received_by: S.me, note: null });
+      await saveRow('payments', null, { job_id: j.id, amount: r2(c.balance), pay_date: today(), kind: 'final', method: 'bank', received_by: S.payer || S.me, note: null });
       render(); toast('Paid in full');
     });
   },
