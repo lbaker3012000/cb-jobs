@@ -864,3 +864,16 @@ html[data-theme="dark"] .chat-send { background: var(--gold); color: var(--navy)
 .ib-jobbtn { margin-top: 8px; }
 html[data-theme="dark"] .ib-act input { accent-color: var(--gold); }
 html[data-theme="dark"] .dropzone svg, html[data-theme="dark"] .ib-ico svg, html[data-theme="dark"] .ib-summary svg, html[data-theme="dark"] .ib-question svg, html[data-theme="dark"] .ib-act em { color: var(--gold); }
+/* Type-to-find job picker */
+.job-pick { margin-bottom: 12px; }
+.job-pick input { width: 100%; }
+.job-suggest { display: flex; flex-direction: column; margin-top: 6px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); }
+.job-suggest p { margin: 0; padding: 10px 12px; }
+.job-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 10px 12px; font: inherit; color: var(--ink); cursor: pointer; }
+.job-opt:last-child { border-bottom: 0; }
+.job-opt:active, .job-opt:hover { background: rgba(217,165,91,.12); }
+.job-chosen { display: flex; align-items: center; gap: 10px; border: 2px solid var(--gold); border-radius: 12px; padding: 8px 10px; background: rgba(217,165,91,.08); }
+.job-chosen svg { width: 20px; height: 20px; flex: none; color: var(--gold-deep); }
+.job-chosen > span { flex: 1; min-width: 0; }
+.job-chosen button { border: 0; background: none; font-size: 1.4rem; line-height: 1; color: var(--muted); padding: 4px 8px; cursor: pointer; }
+html[data-theme="dark"] .job-chosen svg { color: var(--gold); }

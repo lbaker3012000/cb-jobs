@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117j';
+import { db, DEMO } from './db.js?v=20261117k';
 
-const APP_VERSION = '17 Nov 2026 (10)';
+const APP_VERSION = '17 Nov 2026 (11)';
 
 // ======================================================================
 // State & helpers
@@ -738,6 +738,34 @@ function inboxCardHtml(it) {
   return `<article class="card ib-card ibs-${it.status}">${head}${note}${answer}${main}<div class="ib-foot">${file}${del}</div>${read}</article>`;
 }
 
+
+// Type-to-find job picker: "re" → 4 Regent Place, etc.
+function jobMatches(q, limit = 6) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const rank = j => ({ active: 0, quoted: 1, finished: 2 }[j.status] ?? 3);
+  return S.data.jobs.filter(j => j.status !== 'declined').filter(j => {
+    const hay = [j.address, j.postcode, j.customer_name, j.title, j.ref != null ? `#${j.ref} ${j.ref}` : ''].join(' ').toLowerCase();
+    return words.every(w => hay.includes(w));
+  }).sort((a, b) => {
+    const sw = j => (jobName(j).toLowerCase().split(/[\s,]+/).some(t => t.startsWith(words[0])) || String(j.customer_name || '').toLowerCase().split(/\s+/).some(t => t.startsWith(words[0])) ? 0 : 1);
+    return sw(a) - sw(b) || rank(a) - rank(b) || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at));
+  }).slice(0, limit);
+}
+function jobSuggestHtml(q) {
+  const list = jobMatches(q);
+  if (!String(q || '').trim()) return '';
+  if (!list.length) return '<div class="job-suggest"><p class="muted small">No job matches — leave it blank and Claude will work it out.</p></div>';
+  return `<div class="job-suggest">${list.map(j => `<button type="button" class="job-opt" data-act="inboxPickJob" data-id="${j.id}">
+    <b>${esc(jobName(j))}</b><span class="muted small">${[j.customer_name, j.title && jobAddr(j) ? j.title : '', STATUS[j.status]].filter(Boolean).map(esc).join(' · ')}</span></button>`).join('')}</div>`;
+}
+function inboxJobPickHtml() {
+  const j = S.inboxJob ? jobById(S.inboxJob) : null;
+  if (j) return `<div class="job-chosen">${ICON.jobs}<span><b>${esc(jobName(j))}</b>${j.customer_name ? `<span class="muted small"> · ${esc(j.customer_name)}</span>` : ''}</span><button type="button" data-act="inboxClearJob" aria-label="Change job">×</button></div>`;
+  return `<input type="search" id="ib-jobq" placeholder="Start typing an address or name…" autocomplete="off" value="${esc(S.inboxJobQ || '')}" data-input="inboxJobQ">
+    <div id="ib-suggest">${jobSuggestHtml(S.inboxJobQ)}</div>`;
+}
+
 function inboxView({ id }) {
   if (S.data.inboxMissing) return layout({ title: 'Inbox', back: true, body: '<div class="empty">The inbox needs the database set up.</div>' });
   if (id && jobById(id) && S.inboxJobFrom !== id) { S.inboxJob = id; S.inboxJobFrom = id; }
@@ -745,9 +773,6 @@ function inboxView({ id }) {
   const needs = list.filter(i => i.status === 'proposed' || i.status === 'question');
   const waiting = list.filter(i => i.status === 'new' || i.status === 'reading');
   const done = list.filter(i => i.status === 'approved' || i.status === 'rejected');
-  const jobs = S.data.jobs.filter(j => j.status !== 'declined')
-    .sort((a, b) => (a.status === 'finished') - (b.status === 'finished') || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)))
-    .slice(0, 80);
   const payer = S.inboxPayer ?? getPayer();
   const files = S.inboxFiles;
   const body = `
@@ -762,8 +787,8 @@ function inboxView({ id }) {
     ${files.length ? `<div class="ib-files">${files.map((f, i) => `<div class="ib-file">${f.url ? `<img src="${esc(f.url)}" alt="">` : `<span class="ib-pdf">${ICON.doc}<i>PDF</i></span>`}<span>${esc(f.name)}</span><button type="button" data-act="inboxFileRemove" data-i="${i}" aria-label="Remove">×</button></div>`).join('')}</div>` : ''}
     <label>${files.length ? 'Anything Claude should know?' : 'Or type what needs doing'} <span class="muted small">(optional${files.length ? '' : ' if you add a file'})</span>
       <textarea name="text" rows="3" data-input="inboxText" placeholder="${files.length ? 'e.g. tiles for Pevensey, the trap is for Joshua' : 'e.g. Joshua paid £175 today by bank to Henry'}">${esc(S.inboxText || '')}</textarea></label>
-    <label>Which job? <span class="muted small">(optional — Claude will work it out)</span>
-      <select name="job_id" data-input="inboxJob"><option value="">Not sure / not for a job</option>${jobs.map(j => `<option value="${j.id}" ${j.id === S.inboxJob ? 'selected' : ''}>${esc(jobName(j))}${j.customer_name ? ` – ${esc(j.customer_name)}` : ''}</option>`).join('')}</select></label>
+    <div class="field-label">Which job? <span class="muted small">(optional — Claude will work it out)</span></div>
+    <div class="job-pick" id="ib-jobpick">${inboxJobPickHtml()}</div>
     <div class="field-label">Who paid?</div>
     <div class="seg3">${[['a', nameOf('a')], ['b', nameOf('b')], ['', 'Not sure / n/a']].map(([k, l]) =>
       `<label class="${payer === k ? 'on' : ''}"><input type="radio" name="paid_by" value="${k}" ${payer === k ? 'checked' : ''} data-input="inboxPayer">${l}</label>`).join('')}</div>
@@ -2482,7 +2507,7 @@ const FORMS = {
         S.inboxFiles = S.inboxFiles.filter(x => x !== f);
       }
       files.forEach(f => f.url && URL.revokeObjectURL(f.url));
-      S.inboxFiles = []; S.inboxText = ''; S.inboxJob = null;
+      S.inboxFiles = []; S.inboxText = ''; S.inboxJob = null; S.inboxJobQ = '';
       render();
       toast(files.length ? `Sent — reading ${files.length === 1 ? 'the file' : `${files.length} files`} now` : 'Sent to Claude');
       for (const [row, blob] of toRead) await readInboxFile(row, blob);
@@ -2805,6 +2830,12 @@ const FORMS = {
 };
 
 const ACT = {
+  inboxPickJob(d) { S.inboxJob = d.id; S.inboxJobQ = ''; const el = document.getElementById('ib-jobpick'); if (el) el.innerHTML = inboxJobPickHtml(); },
+  inboxClearJob() {
+    S.inboxJob = null; S.inboxJobQ = '';
+    const el = document.getElementById('ib-jobpick');
+    if (el) { el.innerHTML = inboxJobPickHtml(); el.querySelector('input')?.focus(); }
+  },
   inboxFileRemove(d) {
     const f = S.inboxFiles[+d.i];
     if (f?.url) URL.revokeObjectURL(f.url);
@@ -3328,6 +3359,7 @@ document.addEventListener('drop', e => {
 
 // To-do steps: Enter adds the step; ticking strikes it through
 document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'ib-jobq') { e.preventDefault(); document.querySelector('#ib-suggest .job-opt')?.click(); }
   if (e.key === 'Enter' && e.target.id === 'step-new') { e.preventDefault(); ACT.stepAdd({}, e.target); }
   if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'chat-input' && !/iPhone|iPad|Android/.test(navigator.userAgent)) { e.preventDefault(); e.target.form.requestSubmit(); }
 });
@@ -3344,7 +3376,7 @@ document.addEventListener('input', e => {
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJob') { S.chatJob = e.target.value || null; render(); }
   if (k === 'inboxText') S.inboxText = e.target.value;
-  if (k === 'inboxJob') S.inboxJob = e.target.value || null;
+  if (k === 'inboxJobQ') { S.inboxJobQ = e.target.value; const el = document.getElementById('ib-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.inboxJobQ); }
   if (k === 'inboxPayer') { S.inboxPayer = e.target.value; e.target.closest('.seg3').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target))); }
   if (k === 'pushPref') {
     const P = S.push;
