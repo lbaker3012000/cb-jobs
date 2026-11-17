@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117k';
+import { db, DEMO } from './db.js?v=20261117l';
 
-const APP_VERSION = '17 Nov 2026 (11)';
+const APP_VERSION = '17 Nov 2026 (12)';
 
 // ======================================================================
 // State & helpers
@@ -448,9 +448,6 @@ function chatView({ id }) {
     </div>`;
   }).join('');
   const job = S.chatJob ? jobById(S.chatJob) : null;
-  const jobs = S.data.jobs.filter(j => j.status !== 'declined')
-    .sort((a, b) => (a.status === 'finished') - (b.status === 'finished') || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)))
-    .slice(0, 60);
   const body = `
   <div class="chat-thread">
     ${bubbles || `<div class="chat-empty">${ICON.chat}<p>No messages yet.<br>Say hello to ${esc(nameOf(other))} — it pops up on their phone.</p></div>`}
@@ -458,11 +455,13 @@ function chatView({ id }) {
   <form data-form="chat" class="chat-compose">
     <div class="chat-quick">${QUICK_MSGS.map(q => `<button type="button" class="chip" data-act="chatQuick" data-t="${esc(q)}">${esc(q)}</button>`).join('')}</div>
     ${S.chatPhoto ? `<div class="chat-photo-preview"><img src="${esc(S.chatPhoto.url)}" alt=""><span>Photo ready to send — add a message if you like</span><button type="button" data-act="chatPhotoClear" aria-label="Remove photo">×</button></div>` : ''}
+    ${S.chatJobOpen ? `<div class="chat-jobsearch">
+      <div id="chat-suggest">${jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5)}</div>
+      <div class="chat-jobsearch-row"><input type="search" id="chat-jobq" placeholder="Which job? Start typing an address or name…" autocomplete="off" value="${esc(S.chatJobQ || '')}" data-input="chatJobQ"><button type="button" class="btn small" data-act="chatJobClose">Cancel</button></div>
+    </div>` : ''}
     ${job ? `<div class="chat-job-tag">${ICON.jobs}<span>About: <b>${esc(jobName(job))}</b></span><button type="button" data-act="chatJobClear" aria-label="Remove job">×</button></div>` : ''}
     <div class="chat-row">
-      <label class="chat-attach" aria-label="Link a job">${ICON.jobs}
-        <select data-input="chatJob"><option value="">Link a job…</option>${jobs.map(j => `<option value="${j.id}" ${j.id === S.chatJob ? 'selected' : ''}>${esc(jobName(j))}${j.title && jobAddr(j) ? ` – ${esc(j.title)}` : ''}</option>`).join('')}</select>
-      </label>
+      <button type="button" class="chat-attach ${S.chatJobOpen ? 'on' : ''}" data-act="chatJobOpen" aria-label="Link a job">${ICON.jobs}</button>
       <label class="chat-attach" aria-label="Add a photo">${ICON.camera}<input type="file" id="chat-photo" accept="image/*" class="file-hidden"></label>
       <textarea id="chat-input" name="text" rows="1" placeholder="${S.chatPhoto ? 'Add a message (optional)' : `Message ${esc(nameOf(other))}`}" data-input="chatDraft" enterkeyhint="send"></textarea>
       <button class="chat-send" aria-label="Send">${ICON.send}</button>
@@ -752,11 +751,11 @@ function jobMatches(q, limit = 6) {
     return sw(a) - sw(b) || rank(a) - rank(b) || String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at));
   }).slice(0, limit);
 }
-function jobSuggestHtml(q) {
-  const list = jobMatches(q);
+function jobSuggestHtml(q, act = 'inboxPickJob', limit = 6) {
+  const list = jobMatches(q, limit);
   if (!String(q || '').trim()) return '';
-  if (!list.length) return '<div class="job-suggest"><p class="muted small">No job matches — leave it blank and Claude will work it out.</p></div>';
-  return `<div class="job-suggest">${list.map(j => `<button type="button" class="job-opt" data-act="inboxPickJob" data-id="${j.id}">
+  if (!list.length) return `<div class="job-suggest"><p class="muted small">${act === 'inboxPickJob' ? 'No job matches — leave it blank and Claude will work it out.' : 'No job matches that.'}</p></div>`;
+  return `<div class="job-suggest">${list.map(j => `<button type="button" class="job-opt" data-act="${act}" data-id="${j.id}">
     <b>${esc(jobName(j))}</b><span class="muted small">${[j.customer_name, j.title && jobAddr(j) ? j.title : '', STATUS[j.status]].filter(Boolean).map(esc).join(' · ')}</span></button>`).join('')}</div>`;
 }
 function inboxJobPickHtml() {
@@ -2895,9 +2894,16 @@ const ACT = {
   },
   async retry(d, el) { await busy(el, async () => { await loadData(); render(); }); render(); },
   noteSheet(d) { noteSheet(d.id); },
-  msgSheet(d) { S.chatJump = true; S.chatJob = d.job || null; go(d.job ? `#/chat/${d.job}` : '#/chat'); },
+  msgSheet(d) { S.chatJump = true; S.chatJobOpen = false; S.chatJob = d.job || null; go(d.job ? `#/chat/${d.job}` : '#/chat'); },
   chatQuick(d) { const i = document.getElementById('chat-input'); S.chatDraft = d.t; i.value = d.t; growChat(i); i.focus(); },
   chatJobClear() { S.chatJob = null; render(); },
+  chatJobOpen() {
+    if (S.chatJobOpen) { ACT.chatJobClose(); return; }
+    S.chatJobOpen = true; S.chatJobQ = ''; render();
+    document.getElementById('chat-jobq')?.focus();
+  },
+  chatJobClose() { S.chatJobOpen = false; S.chatJobQ = ''; render(); document.getElementById('chat-input')?.focus(); },
+  chatPickJob(d) { S.chatJob = d.id; ACT.chatJobClose(); },
   chatPhotoClear() { if (S.chatPhoto?.url) URL.revokeObjectURL(S.chatPhoto.url); S.chatPhoto = null; render(); },
   chatPhotoView(d) { chatPhotoView(d.id); },
   async chatPhotoToJob(d, el) {
@@ -3359,6 +3365,7 @@ document.addEventListener('drop', e => {
 
 // To-do steps: Enter adds the step; ticking strikes it through
 document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'chat-jobq') { e.preventDefault(); document.querySelector('#chat-suggest .job-opt')?.click(); }
   if (e.key === 'Enter' && e.target.id === 'ib-jobq') { e.preventDefault(); document.querySelector('#ib-suggest .job-opt')?.click(); }
   if (e.key === 'Enter' && e.target.id === 'step-new') { e.preventDefault(); ACT.stepAdd({}, e.target); }
   if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'chat-input' && !/iPhone|iPad|Android/.test(navigator.userAgent)) { e.preventDefault(); e.target.form.requestSubmit(); }
@@ -3374,7 +3381,7 @@ document.addEventListener('input', e => {
   if (!k) return;
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
-  if (k === 'chatJob') { S.chatJob = e.target.value || null; render(); }
+  if (k === 'chatJobQ') { S.chatJobQ = e.target.value; const el = document.getElementById('chat-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5); }
   if (k === 'inboxText') S.inboxText = e.target.value;
   if (k === 'inboxJobQ') { S.inboxJobQ = e.target.value; const el = document.getElementById('ib-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.inboxJobQ); }
   if (k === 'inboxPayer') { S.inboxPayer = e.target.value; e.target.closest('.seg3').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target))); }

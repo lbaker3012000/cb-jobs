@@ -877,3 +877,11 @@ html[data-theme="dark"] .dropzone svg, html[data-theme="dark"] .ib-ico svg, html
 .job-chosen > span { flex: 1; min-width: 0; }
 .job-chosen button { border: 0; background: none; font-size: 1.4rem; line-height: 1; color: var(--muted); padding: 4px 8px; cursor: pointer; }
 html[data-theme="dark"] .job-chosen svg { color: var(--gold); }
+/* Chat: find a job to link */
+.chat-attach { cursor: pointer; font: inherit; padding: 0; }
+.chat-attach.on { border-color: var(--gold); color: var(--gold-deep); }
+.chat-jobsearch { margin-bottom: 8px; }
+.chat-jobsearch-row { display: flex; gap: 6px; align-items: center; }
+.chat-jobsearch-row input { flex: 1; min-width: 0; }
+.chat-jobsearch .job-suggest { margin: 0 0 6px; }
+html[data-theme="dark"] .chat-attach.on { color: var(--gold); }
