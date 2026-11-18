@@ -1,6 +1,6 @@
-import { db, DEMO } from './db.js?v=20261117m';
+import { db, DEMO } from './db.js?v=20261118a';
 
-const APP_VERSION = '17 Nov 2026 (13)';
+const APP_VERSION = '18 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -704,7 +704,7 @@ function inboxCardHtml(it) {
   if (it.status === 'reading') {
     main = `<p class="muted small" id="rd-${it.id}">${esc(S.reading[it.id] || `Being read on ${byName(it.created_by) === 'You' ? 'this' : `${byName(it.created_by)}'s`} phone…`)}</p>`;
   } else if (it.status === 'new') {
-    main = `<p class="muted small">Claude checks at 12pm and 6pm. Need it sooner? Tell Claude "process invoices".</p>`;
+    main = `<p class="muted small">Claude checks at 8am and 5pm. Need it sooner? Tell Claude "process invoices".</p>`;
   } else if (it.status === 'proposed') {
     main = `<form data-form="inboxApprove" class="ib-proposal">
       <input type="hidden" name="id" value="${it.id}">
@@ -792,7 +792,7 @@ function inboxView({ id }) {
     <div class="seg3">${[['a', nameOf('a')], ['b', nameOf('b')], ['', 'Not sure / n/a']].map(([k, l]) =>
       `<label class="${payer === k ? 'on' : ''}"><input type="radio" name="paid_by" value="${k}" ${payer === k ? 'checked' : ''} data-input="inboxPayer">${l}</label>`).join('')}</div>
     <button class="btn primary wide big" id="ib-send">${ICON.send} Send to Claude</button>
-    <p class="muted small center">Claude checks at 12pm and 6pm and puts what it would add here for you to approve. Nothing changes until you press Approve.</p>
+    <p class="muted small center">Claude checks at 8am and 5pm and puts what it would add here for you to approve. Nothing changes until you press Approve.</p>
   </form>
   ${needs.length ? `<h2 class="section-title">Needs you <span class="count">${needs.length}</span></h2>${needs.map(inboxCardHtml).join('')}` : ''}
   ${waiting.length ? `<h2 class="section-title">Waiting for Claude</h2>${waiting.map(inboxCardHtml).join('')}` : ''}
@@ -2860,7 +2860,7 @@ const ACT = {
       <input type="hidden" name="id" value="${esc(d.id)}">
       <label>Tell Claude what's wrong<textarea name="text" rows="4" required placeholder="e.g. the tiles were for Pevensey not Mill Lane, and Luke paid"></textarea></label>
       <button class="btn primary wide big">Send back to Claude</button>
-      <p class="muted small">Claude will look again at the next check (12pm / 6pm) or when you say "process invoices".</p>
+      <p class="muted small">Claude will look again at the next check (8am / 5pm) or when you say "process invoices".</p>
     </form>`);
     setTimeout(() => sheet.querySelector('textarea')?.focus(), 60);
   },
