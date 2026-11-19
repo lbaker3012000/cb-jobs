@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119f';
-const VERSION_TAG = '20261119f';
+import { db, DEMO } from './db.js?v=20261119g';
+const VERSION_TAG = '20261119g';
 
-const APP_VERSION = '19 Nov 2026 (6)';
+const APP_VERSION = '19 Nov 2026 (7)';
 
 // ======================================================================
 // State & helpers
@@ -2690,13 +2690,48 @@ async function makePdf(filename, selector = '.doc', width = 760) {
   holder.appendChild(clone);
   document.body.appendChild(holder);
   try {
+    // Quotes & invoices: squeeze onto one A4 page if it can be done neatly; otherwise spill onto more pages
+    if (clone.classList.contains('inv-paper')) {
+      await Promise.all([...clone.querySelectorAll('img')].map(i => (i.complete ? null : i.decode?.().catch(() => {}))));
+      const pageH = width * (297 - 16) / (210 - 16); // one A4 page (inside 8mm margins) in screen pixels
+      let fit = 0;
+      while (fit < 3 && clone.offsetHeight > pageH - 6) { fit++; clone.classList.remove(`fit${fit - 1}`); clone.classList.add(`fit${fit}`); }
+      if (clone.offsetHeight > pageH - 6) { clone.classList.remove('fit3'); clone.classList.add('fit1', 'multi'); invPaginate(clone, pageH); }
+    }
     const blob = await window.html2pdf().set({
       margin: [8, 8, 8, 8], image: { type: 'jpeg', quality: 0.95 },
       html2canvas: { scale: 2, backgroundColor: '#ffffff', windowWidth: width, width, scrollX: 0, scrollY: -window.scrollY, x: 0, y: 0 },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'] },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
     }).from(clone).outputPdf('blob');
     return new File([blob], filename, { type: 'application/pdf' });
   } finally { holder.remove(); }
+}
+// Long quotes/invoices: push any item that would be cut by a page edge onto the next page
+function invPaginate(el, pageH) {
+  const top0 = () => el.getBoundingClientRect().top;
+  const blocks = [];
+  el.querySelectorAll('.inv-body > *, .inv-footer').forEach(n => {
+    if (n.matches('hr')) return;
+    // a very long item can be split between its lines, but never through a line
+    if (n.classList.contains('inv-category') && n.offsetHeight > pageH * 0.6) n.querySelectorAll('h4, p').forEach(x => blocks.push([x, x]));
+    else blocks.push([n, n]);
+  });
+  // keep the footer with the bottom band and trim
+  const foot = blocks.find(b => b[0].classList.contains('inv-footer'));
+  if (foot) foot[1] = el.lastElementChild;
+  for (const [first, last] of blocks) {
+    const t = first.getBoundingClientRect().top - top0();
+    const bottom = last.getBoundingClientRect().bottom - top0();
+    if (bottom - t >= pageH) continue;
+    const page = Math.floor(t / pageH);
+    if (bottom > (page + 1) * pageH - 2) {
+      const gap = document.createElement('div');
+      gap.className = 'inv-gap';
+      gap.style.height = `${Math.ceil((page + 1) * pageH - t + 18)}px`;
+      first.before(gap);
+    }
+  }
 }
 function saveFile(file) {
   const a = document.createElement('a');
