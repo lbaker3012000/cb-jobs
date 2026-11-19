@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119a';
-const VERSION_TAG = '20261119a';
+import { db, DEMO } from './db.js?v=20261119b';
+const VERSION_TAG = '20261119b';
 
-const APP_VERSION = '19 Nov 2026';
+const APP_VERSION = '19 Nov 2026 (2)';
 
 // ======================================================================
 // State & helpers
@@ -872,6 +872,7 @@ const Q_PROFILES = {
     },
   },
 };
+const Q_STARTERS = new Set(['works', 'preparation', 'plumbing']);
 const Q_INVOICE_START = 1089; // shared running invoice number for both businesses
 const qSettings = () => {
   const saved = set().doc_profiles || {};
@@ -1108,9 +1109,9 @@ function qEditView() {
 
 function qCatsHtml(d) {
   return d.categories.map((c, ci) => `<div class="q-cat">
-    <div class="q-cat-head"><input class="q-heading" data-qcat="${ci}" value="${esc(c.heading)}" placeholder="Heading, e.g. Preparation">
+    <div class="q-cat-head"><input class="q-heading" data-qcat="${ci}" value="${esc(c.heading)}" placeholder="Heading, e.g. Bathroom">
       <button type="button" class="q-x" data-act="qDelCat" data-i="${ci}" aria-label="Remove heading">×</button></div>
-    ${c.lines.map((l, li) => `<div class="q-line"><textarea rows="1" data-qline="${ci}:${li}" placeholder="Work done">${esc(l)}</textarea>
+    ${c.lines.map((l, li) => `<div class="q-line"><textarea rows="1" data-qline="${ci}:${li}" placeholder="What's being done, e.g. Replace bath trap">${esc(l)}</textarea>
       ${c.lines.length > 1 ? `<button type="button" class="q-x" data-act="qDelLine" data-i="${ci}:${li}" aria-label="Remove line">×</button>` : ''}</div>`).join('')}
     <button type="button" class="link-btn small" data-act="qAddLine" data-i="${ci}">+ Add line</button>
   </div>`).join('') || '<p class="muted small">No headings yet.</p>';
@@ -3264,7 +3265,7 @@ const ACT = {
       const row = {
         profile: q.profile, doc_type: q.doc_type, number, job_id: q.job_id || null, from_quote: q.from_quote || null,
         customer: q.customer, doc_date: q.doc_date || today(),
-        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.lines.length), // headings left with no lines aren't printed
+        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.lines.length || (c.heading && !Q_STARTERS.has(c.heading.toLowerCase()))), // keep typed headings; drop untouched starter ones
         total: r2(num(q.total)), pay_to: q.pay_to || 'primary',
         paid_to_date: q.doc_type === 'invoice' ? r2(num(q.paid_to_date)) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
         business: qBusiness(q.profile, q.pay_to), updated_at: new Date().toISOString(),
