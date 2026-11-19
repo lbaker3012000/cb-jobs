@@ -993,3 +993,5 @@ html[data-theme="dark"] .q-tag.invoice { background: #6e85c9; }
 .q-mat input { width: 22px !important; height: 22px; flex: none; margin: 0; -webkit-appearance: auto; appearance: auto; accent-color: var(--navy); }
 .q-mat > span { display: flex; flex-direction: column; }
 html[data-theme="dark"] .q-mat input { accent-color: var(--gold); }
+.inv-paper .inv-doctype.paid { background: #2e7d4f; color: #fff; }
+.inv-paper .paid-row { color: #2e7d4f; font-weight: 600; }

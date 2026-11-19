@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119e';
-const VERSION_TAG = '20261119e';
+import { db, DEMO } from './db.js?v=20261119f';
+const VERSION_TAG = '20261119f';
 
-const APP_VERSION = '19 Nov 2026 (5)';
+const APP_VERSION = '19 Nov 2026 (6)';
 
 // ======================================================================
 // State & helpers
@@ -910,7 +910,7 @@ function qBlank(profile = localStorage.getItem('cb-quote-profile') || 'cb', type
     customer: { name: '', addr1: '', town: '', postcode: '' },
     doc_date: today(),
     categories: [{ heading: '', lines: [] }],
-    total: '', pay_to: 'primary', paid_to_date: 0, paid_note: '', materials_included: true,
+    total: '', pay_to: 'primary', paid_to_date: 0, paid_note: '', materials_included: true, paid_in_full: false,
   };
 }
 function qDraft() {
@@ -949,6 +949,7 @@ function qFromJob(j, type) {
   d.total = c.gross ? String(r2(c.gross)) : '';
   if (type === 'invoice' && c.paid > 0) {
     d.paid_to_date = r2(c.paid);
+    d.paid_in_full = c.gross > 0 && c.paid >= c.gross - 0.004;
     d.paid_note = c.pays.slice().sort((a, b) => String(a.pay_date).localeCompare(String(b.pay_date))).map(p => fmtShort(p.pay_date)).join(', ');
   }
   return d;
@@ -965,6 +966,7 @@ function qPaperHtml(rec) {
     ? 'Cunningham <span class="cf-fix">&amp;</span> Baker' : esc(b.businessName || '');
   const cu = rec.customer || {};
   const paid = num(rec.paid_to_date);
+  const pif = !isQuote && rec.paid_in_full;
   const cats = (rec.categories || []).map(cat => {
     const lines = (cat.lines || []).filter(l => l && String(l).trim());
     if (!cat.heading && !lines.length) return '';
@@ -975,7 +977,7 @@ function qPaperHtml(rec) {
     <div class="inv-band">${cb ? `<img class="cf-logo" src="img/cb-banner.jpg" alt="Cunningham &amp; Baker">` : `<div class="logo-badge">${letter}</div>`}</div>
     <div class="inv-body">
       <div class="inv-top-row">
-        <div><div class="inv-brand">${brand}${isQuote ? '<span class="inv-doctype">Quote</span>' : ''}</div>
+        <div><div class="inv-brand">${brand}${isQuote ? '<span class="inv-doctype">Quote</span>' : ''}${pif ? '<span class="inv-doctype paid">Paid</span>' : ''}</div>
           ${b.tagline ? `<div class="inv-tagline">${esc(b.tagline)}</div>` : ''}</div>
         <div class="inv-billed"><div class="label">${isQuote ? 'Quoted to' : 'Billed to'}</div>
           <div class="name">${esc(cu.name || '—')}</div>
@@ -987,13 +989,17 @@ function qPaperHtml(rec) {
       <hr class="inv-rule">
       ${cats}
       ${rec.materials_included ? '<div class="inv-materials">All materials included</div>' : ''}
-      ${!isQuote && (b.sortCode || b.accountNumber) ? `<div class="inv-bank"><strong>Bank Details</strong>
+      ${!isQuote && !pif && (b.sortCode || b.accountNumber) ? `<div class="inv-bank"><strong>Bank Details</strong>
         ${b.accountName ? `<div><span class="bk">Account name:</span> ${esc(b.accountName)}</div>` : ''}
         ${b.sortCode ? `<div><span class="bk">Sort code:</span> ${esc(b.sortCode)}</div>` : ''}
         ${b.accountNumber ? `<div><span class="bk">Account number:</span> ${esc(b.accountNumber)}</div>` : ''}
         <div><span class="bk">Reference:</span> ${esc(rec.number ?? '')}</div></div>` : ''}
       <hr class="inv-rule">
-      ${paid > 0 && !isQuote
+      ${pif
+        ? `<div class="inv-sub-row"><span>Total for all materials and labour:</span><span class="num">${qMoney(rec.total)}</span></div>
+           <div class="inv-sub-row paid-row"><span>Paid in full${rec.paid_note ? ` (${esc(rec.paid_note)})` : ''} — thank you</span><span class="num">✓</span></div>
+           <div class="inv-total-row"><span>Balance due:</span><span class="num">£0</span></div>`
+        : paid > 0 && !isQuote
         ? `<div class="inv-sub-row"><span>Total for all materials and labour:</span><span class="num">${qMoney(rec.total)}</span></div>
            <div class="inv-sub-row"><span>Less amount already paid${rec.paid_note ? ` (${esc(rec.paid_note)})` : ''}:</span><span class="num">−${qMoney(paid)}</span></div>
            <div class="inv-total-row"><span>${num(rec.total) - paid > 0.004 ? 'Balance due:' : 'Paid in full — balance:'}</span><span class="num">${qMoney(Math.max(0, num(rec.total) - paid))}</span></div>`
@@ -1106,8 +1112,9 @@ function qEditView() {
   <section class="card q-form">
     <h3>Total</h3>
     <label>${isQuote ? 'Estimated total cost (£)' : 'Final total for all materials and labour (£)'}<input type="number" inputmode="decimal" step="0.01" data-qf="total" value="${esc(d.total)}"></label>
-    ${!isQuote ? `<div class="two"><label>Already paid (£)<input type="number" inputmode="decimal" step="0.01" data-qf="paid_to_date" value="${num(d.paid_to_date) || ''}" placeholder="0"></label>
-      <label>Paid when <span class="muted small">(optional)</span><input data-qf="paid_note" value="${esc(d.paid_note || '')}" placeholder="e.g. 2 November"></label></div>` : ''}
+    ${!isQuote ? `<label class="q-mat"><input type="checkbox" data-qf="paid_in_full" ${d.paid_in_full ? 'checked' : ''}> <span><b>Paid in full</b><span class="muted small">They've already paid — shows "Paid", balance £0, no bank details</span></span></label>
+      <div class="two q-paid">${d.paid_in_full ? '' : `<label>Already paid (£)<input type="number" inputmode="decimal" step="0.01" data-qf="paid_to_date" value="${num(d.paid_to_date) || ''}" placeholder="0"></label>`}
+      <label>Paid when <span class="muted small">(optional)</span><input data-qf="paid_note" value="${esc(d.paid_note || '')}" placeholder="e.g. 2 November, by bank"></label></div>` : ''}
   </section>
 
   <button class="btn primary wide big" data-act="qGenerate">${editing ? 'Save changes' : `Make ${isQuote ? 'quote' : 'invoice'}`} →</button>
@@ -3235,7 +3242,7 @@ const ACT = {
     if (!q.id) q.number = null;
     if (d.t === 'invoice' && q.job_id && !num(q.paid_to_date)) {
       const j = jobById(q.job_id);
-      if (j) { const f = qFromJob(j, 'invoice'); q.paid_to_date = f.paid_to_date; q.paid_note = f.paid_note; }
+      if (j) { const f = qFromJob(j, 'invoice'); q.paid_to_date = f.paid_to_date; q.paid_note = f.paid_note; q.paid_in_full = f.paid_in_full; }
     }
     qKeep(); render();
   },
@@ -3279,7 +3286,8 @@ const ACT = {
         categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.heading || c.lines.length) // empty boxes aren't printed
           .filter(c => c.lines.length || !/^all materials included\.?$/i.test(c.heading)), // that line is its own tick box now
         total: r2(num(q.total)), pay_to: q.pay_to || 'primary', materials_included: !!q.materials_included,
-        paid_to_date: q.doc_type === 'invoice' ? r2(num(q.paid_to_date)) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
+        paid_in_full: q.doc_type === 'invoice' && !!q.paid_in_full,
+        paid_to_date: q.doc_type === 'invoice' ? (q.paid_in_full ? r2(num(q.total)) : r2(num(q.paid_to_date))) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
         business: qBusiness(q.profile, q.pay_to), updated_at: new Date().toISOString(),
       };
       let saved;
@@ -3305,7 +3313,7 @@ const ACT = {
       customer: { name: '', addr1: '', town: '', postcode: '', ...(rec.customer || {}) }, doc_date: rec.doc_date,
       categories: (rec.categories || []).map(c => ({ heading: c.heading || '', lines: [...(c.lines || [])] })),
       total: String(rec.total ?? ''), pay_to: rec.pay_to, paid_to_date: num(rec.paid_to_date), paid_note: rec.paid_note || '',
-      materials_included: !!rec.materials_included,
+      materials_included: !!rec.materials_included, paid_in_full: !!rec.paid_in_full,
     };
     const old = S.qd.categories.findIndex(c => !c.lines.length && /^all materials included\.?$/i.test(c.heading.trim()));
     if (old >= 0) { S.qd.categories.splice(old, 1); S.qd.materials_included = true; }
@@ -3314,7 +3322,7 @@ const ACT = {
   },
   qCopy(d) {
     ACT.qEdit(d);
-    Object.assign(S.qd, { id: null, number: null, from_quote: null, doc_date: today() });
+    Object.assign(S.qd, { id: null, number: null, from_quote: null, doc_date: today(), paid_in_full: false, paid_to_date: 0, paid_note: "" });
     qKeep(); render(); toast('Copied — change what you need, then save');
   },
   qConvert(d) {
@@ -3323,7 +3331,7 @@ const ACT = {
     ACT.qEdit(d);
     Object.assign(S.qd, { id: null, number: null, doc_type: 'invoice', from_quote: rec.id, doc_date: today(), pay_to: 'primary' });
     const j = rec.job_id ? jobById(rec.job_id) : null;
-    if (j) { const f = qFromJob(j, 'invoice'); S.qd.paid_to_date = f.paid_to_date; S.qd.paid_note = f.paid_note; }
+    if (j) { const f = qFromJob(j, 'invoice'); S.qd.paid_to_date = f.paid_to_date; S.qd.paid_note = f.paid_note; S.qd.paid_in_full = f.paid_in_full; }
     qKeep(); render(); toast('Turned into an invoice — check it, then save');
   },
   qDelete(d) {
@@ -3903,6 +3911,7 @@ function qSetField(el) {
     if (path === 'number') v = parseInt(v, 10) > 0 ? parseInt(v, 10) : null;
     if (path === 'paid_to_date') v = num(v);
     if (path.startsWith('customer.')) d.customer[path.slice(9)] = v; else d[path] = v;
+    if (path === 'paid_in_full') { qKeep(); render(); return; }
     if (path === 'pay_to') el.closest('.seg3')?.querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(el)));
   } else if (el.dataset.qcat != null) {
     d.categories[+el.dataset.qcat].heading = el.value;
