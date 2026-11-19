@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119c';
-const VERSION_TAG = '20261119c';
+import { db, DEMO } from './db.js?v=20261119d';
+const VERSION_TAG = '20261119d';
 
-const APP_VERSION = '19 Nov 2026 (3)';
+const APP_VERSION = '19 Nov 2026 (4)';
 
 // ======================================================================
 // State & helpers
@@ -910,13 +910,20 @@ function qBlank(profile = localStorage.getItem('cb-quote-profile') || 'cb', type
     customer: { name: '', addr1: '', town: '', postcode: '' },
     doc_date: today(),
     categories: [{ heading: '', lines: [] }],
-    total: '', pay_to: 'primary', paid_to_date: 0, paid_note: '',
+    total: '', pay_to: 'primary', paid_to_date: 0, paid_note: '', materials_included: true,
   };
 }
 function qDraft() {
   if (!S.qd) {
     try { S.qd = JSON.parse(localStorage.getItem(Q_DRAFT_KEY)); } catch { S.qd = null; }
     if (!S.qd?.categories) S.qd = qBlank();
+    // drafts from before "All materials included" became its own tick box
+    if (S.qd.materials_included === undefined) {
+      const old = S.qd.categories.findIndex(c => !(c.lines || []).some(l => String(l).trim()) && /^all materials included\.?$/i.test(String(c.heading).trim()));
+      S.qd.materials_included = old >= 0 || !S.qd.id;
+      if (old >= 0) S.qd.categories.splice(old, 1);
+      if (!S.qd.categories.length) S.qd.categories = [{ heading: '', lines: [] }];
+    }
   }
   return S.qd;
 }
@@ -938,7 +945,6 @@ function qFromJob(j, type) {
   d.doc_date = type === 'quote' ? (j.quote_date || today()) : (j.finished_date || today());
   d.categories = [
     { heading: j.title || 'Works', lines: work },
-    { heading: 'All materials included', lines: [] },
   ];
   d.total = c.gross ? String(r2(c.gross)) : '';
   if (type === 'invoice' && c.paid > 0) {
@@ -980,6 +986,7 @@ function qPaperHtml(rec) {
       <div class="inv-services-title">${isQuote ? 'Proposed Works' : 'Services Provided'}</div>
       <hr class="inv-rule">
       ${cats}
+      ${rec.materials_included ? '<div class="inv-materials">All materials included</div>' : ''}
       ${!isQuote && (b.sortCode || b.accountNumber) ? `<div class="inv-bank"><strong>Bank Details</strong>
         ${b.accountName ? `<div><span class="bk">Account name:</span> ${esc(b.accountName)}</div>` : ''}
         ${b.sortCode ? `<div><span class="bk">Sort code:</span> ${esc(b.sortCode)}</div>` : ''}
@@ -1093,6 +1100,7 @@ function qEditView() {
     <p class="muted small">One box per item. Add detail underneath only for bigger jobs.</p>
     <div id="q-cats">${qCatsHtml(d)}</div>
     <button type="button" class="btn small" data-act="qAddCat">${ICON.plus} Add item</button>
+    <label class="q-mat"><input type="checkbox" data-qf="materials_included" ${d.materials_included ? 'checked' : ''}> <span><b>All materials included</b><span class="muted small">Printed on its own after the list</span></span></label>
   </section>
 
   <section class="card q-form">
@@ -3263,8 +3271,9 @@ const ACT = {
       const row = {
         profile: q.profile, doc_type: q.doc_type, number, job_id: q.job_id || null, from_quote: q.from_quote || null,
         customer: q.customer, doc_date: q.doc_date || today(),
-        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.heading || c.lines.length), // empty boxes aren't printed
-        total: r2(num(q.total)), pay_to: q.pay_to || 'primary',
+        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.heading || c.lines.length) // empty boxes aren't printed
+          .filter(c => c.lines.length || !/^all materials included\.?$/i.test(c.heading)), // that line is its own tick box now
+        total: r2(num(q.total)), pay_to: q.pay_to || 'primary', materials_included: !!q.materials_included,
         paid_to_date: q.doc_type === 'invoice' ? r2(num(q.paid_to_date)) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
         business: qBusiness(q.profile, q.pay_to), updated_at: new Date().toISOString(),
       };
@@ -3283,7 +3292,11 @@ const ACT = {
       customer: { name: '', addr1: '', town: '', postcode: '', ...(rec.customer || {}) }, doc_date: rec.doc_date,
       categories: (rec.categories || []).map(c => ({ heading: c.heading || '', lines: [...(c.lines || [])] })),
       total: String(rec.total ?? ''), pay_to: rec.pay_to, paid_to_date: num(rec.paid_to_date), paid_note: rec.paid_note || '',
+      materials_included: !!rec.materials_included,
     };
+    const old = S.qd.categories.findIndex(c => !c.lines.length && /^all materials included\.?$/i.test(c.heading.trim()));
+    if (old >= 0) { S.qd.categories.splice(old, 1); S.qd.materials_included = true; }
+    if (!S.qd.categories.length) S.qd.categories = [{ heading: '', lines: [] }];
     qKeep(); go('#/quotes');
   },
   qCopy(d) {
@@ -3873,7 +3886,7 @@ function qSetField(el) {
   const d = qDraft();
   if (el.dataset.qf) {
     const path = el.dataset.qf;
-    let v = el.value;
+    let v = el.type === 'checkbox' ? el.checked : el.value;
     if (path === 'number') v = parseInt(v, 10) > 0 ? parseInt(v, 10) : null;
     if (path === 'paid_to_date') v = num(v);
     if (path.startsWith('customer.')) d.customer[path.slice(9)] = v; else d[path] = v;
@@ -3889,7 +3902,7 @@ function qSetField(el) {
   qKeep();
 }
 document.addEventListener('input', e => { if (e.target.closest?.('.q-form')) qSetField(e.target); });
-document.addEventListener('change', e => { if (e.target.closest?.('.q-form') && e.target.type === 'radio') qSetField(e.target); });
+document.addEventListener('change', e => { if (e.target.closest?.('.q-form') && (e.target.type === 'radio' || e.target.type === 'checkbox')) qSetField(e.target); });
 
 // Drag invoices onto the inbox page (computer)
 ['dragenter', 'dragover'].forEach(t => document.addEventListener(t, e => {

@@ -351,3 +351,5 @@ do $$ begin
     alter publication supabase_realtime add table public.docs;
   end if;
 end $$;
+-- "All materials included" printed on its own after the list of works (19 Nov 2026)
+alter table public.docs add column if not exists materials_included boolean not null default false;
