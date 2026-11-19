@@ -1,6 +1,7 @@
-import { db, DEMO } from './db.js?v=20261118a';
+import { db, DEMO } from './db.js?v=20261119a';
+const VERSION_TAG = '20261119a';
 
-const APP_VERSION = '18 Nov 2026';
+const APP_VERSION = '19 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -194,7 +195,7 @@ function todos() {
     const c = calc(j);
     if (j.status === 'quoted' && !j.quote_date) {
       const vis = visitOf(j);
-      if (!vis || vis.event_date < t) add(j, 3, '✉', 'Quote to send', vis ? `Visited ${fmtShort(vis.event_date)} — price it up and send it` : 'Price it up, then Send PDF', null, `<a class="btn small" href="#/doc/${j.id}/quote">Quote</a>`);
+      if (!vis || vis.event_date < t) add(j, 3, '✉', 'Quote to send', vis ? `Visited ${fmtShort(vis.event_date)} — price it up and send it` : 'Price it up, then Send PDF', null, `<a class="btn small" href="#/quotes/job-quote/${j.id}">Quote</a>`);
     } else if (j.status === 'quoted') {
       const sent = j.quote_date;
       const chased = getMark(j, 'chased_at');
@@ -212,7 +213,7 @@ function todos() {
     } else if (j.status === 'finished') {
       if (c.balance > 0.004) {
         const chased = getMark(j, 'chased_at');
-        if (!chased || chased < (j.finished_date || '')) add(j, 1, '£', 'Send invoice', `${money(c.balance)} to collect`, 'invoice_send', `<a class="btn small" href="#/doc/${j.id}/invoice">Invoice</a>`);
+        if (!chased || chased < (j.finished_date || '')) add(j, 1, '£', 'Send invoice', `${money(c.balance)} to collect`, 'invoice_send', `<a class="btn small" href="#/quotes/job-invoice/${j.id}">Invoice</a>`);
         else if (daysSince(chased) >= num(st.payment_chase_days)) add(j, 1, '£', 'Payment overdue', `${money(c.balance)} · finished ${daysSince(j.finished_date)} days ago`, 'payment', `<button class="btn small" data-act="paidFull" data-id="${j.id}">Paid</button>`);
       }
     }
@@ -353,7 +354,7 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView,
+    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView,
   };
   const typing = r.view === 'chat' && document.activeElement?.id === 'chat-input';
   const nearBottom = r.view !== 'chat' || (window.innerHeight + window.scrollY >= document.body.scrollHeight - 160);
@@ -397,6 +398,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   ${nav ? `<nav class="tabs">
     ${tab('jobs', 'Jobs', ICON.jobs)}
     ${tab('calendar', 'Calendar', ICON.cal)}
+    ${tab('quotes', 'Quotes', ICON.doc)}
     ${tab('notes', 'Notes', ICON.note)}
     ${tab('archive', 'Archive', ICON.archive)}
     ${tab('money', 'Money', ICON.money)}
@@ -845,6 +847,364 @@ async function applyAction(a, keyMap) {
   }
 }
 
+// ======================================================================
+// Quotes tab: quotes & invoices for Cunningham & Baker and Henry The Plumber
+// (based on Henry's invoice maker)
+// ======================================================================
+const Q_PROFILES = {
+  cb: {
+    label: 'Cunningham & Baker', short: 'C&B',
+    starter: ['Works'],
+    defaults: {
+      businessName: 'Cunningham & Baker', tagline: '', phone: '07534 632490', email: 'info@cunninghamandbaker.co.uk', address: '',
+      accountName: 'Henry Cunningham', sortCode: '20-26-78', accountNumber: '13014363',
+      altAccountName: 'Luke Baker', altSortCode: '07-04-36', altAccountNumber: '37417016',
+      quoteStart: 1047,
+    },
+  },
+  htp: {
+    label: 'Henry The Plumber', short: 'Henry',
+    starter: ['Preparation', 'Plumbing'],
+    defaults: {
+      businessName: 'Henry The Plumber', tagline: '', phone: '', email: '', address: '',
+      accountName: 'Henry Cunningham', sortCode: '20-26-78', accountNumber: '13014363',
+      quoteStart: 1047,
+    },
+  },
+};
+const Q_INVOICE_START = 1089; // shared running invoice number for both businesses
+const qSettings = () => {
+  const saved = set().doc_profiles || {};
+  return {
+    invoiceStart: num(saved.invoiceStart) || Q_INVOICE_START,
+    cb: { ...Q_PROFILES.cb.defaults, ...(saved.cb || {}) },
+    htp: { ...Q_PROFILES.htp.defaults, ...(saved.htp || {}) },
+  };
+};
+const qDocs = () => S.data?.docs || [];
+function qNextNumber(type, profile) {
+  const st = qSettings();
+  if (type === 'invoice') {
+    const max = Math.max(0, ...qDocs().filter(d => d.doc_type === 'invoice').map(d => d.number));
+    return Math.max(st.invoiceStart, max + 1);
+  }
+  const max = Math.max(0, ...qDocs().filter(d => d.doc_type === 'quote' && d.profile === profile).map(d => d.number));
+  return Math.max(num(st[profile].quoteStart) || 1, max + 1);
+}
+const qMoney = n => {
+  n = Math.round((num(n) + Number.EPSILON) * 100) / 100;
+  return '£' + n.toLocaleString('en-GB', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+};
+const qLoadFonts = () => {
+  if (document.getElementById('inv-fonts')) return;
+  const l = document.createElement('link');
+  l.id = 'inv-fonts'; l.rel = 'stylesheet'; l.href = `css/inv-fonts.css?v=${VERSION_TAG}`;
+  document.head.appendChild(l);
+};
+
+// The draft being worked on (kept on this phone so nothing is lost)
+const Q_DRAFT_KEY = 'cb-quote-draft';
+function qBlank(profile = localStorage.getItem('cb-quote-profile') || 'cb', type = 'quote') {
+  return {
+    id: null, profile, doc_type: type, number: null, job_id: null, from_quote: null,
+    customer: { name: '', addr1: '', town: '', postcode: '' },
+    doc_date: today(),
+    categories: Q_PROFILES[profile].starter.map(h => ({ heading: h, lines: [''] })),
+    total: '', pay_to: 'primary', paid_to_date: 0, paid_note: '',
+  };
+}
+function qDraft() {
+  if (!S.qd) {
+    try { S.qd = JSON.parse(localStorage.getItem(Q_DRAFT_KEY)); } catch { S.qd = null; }
+    if (!S.qd?.categories) S.qd = qBlank();
+  }
+  return S.qd;
+}
+let qSaveTimer = null;
+function qKeep() {
+  clearTimeout(qSaveTimer);
+  qSaveTimer = setTimeout(() => { try { localStorage.setItem(Q_DRAFT_KEY, JSON.stringify(S.qd)); } catch { /* full */ } }, 250);
+}
+
+// Fill a draft from one of our jobs
+function qFromJob(j, type) {
+  let lines = String(j.address || '').split('\n').map(x => x.trim()).filter(Boolean);
+  if (lines.length === 1 && lines[0].includes(',')) { const i = lines[0].lastIndexOf(','); lines = [lines[0].slice(0, i).trim(), lines[0].slice(i + 1).trim()]; }
+  const work = String(j.description || '').split('\n').map(x => x.replace(/^[-•*\s]+/, '').replace(/\.\s*$/, '').trim()).filter(Boolean);
+  const c = calc(j);
+  const d = qBlank(S.qd?.profile || localStorage.getItem('cb-quote-profile') || 'cb', type);
+  d.job_id = j.id;
+  d.customer = { name: j.customer_name || '', addr1: lines[0] || '', town: lines.slice(1).join(', '), postcode: j.postcode || '' };
+  d.doc_date = type === 'quote' ? (j.quote_date || today()) : (j.finished_date || today());
+  d.categories = [
+    { heading: j.title || 'Works', lines: work.length ? work : [''] },
+    { heading: 'Materials', lines: ['All materials included'] },
+  ];
+  d.total = c.gross ? String(r2(c.gross)) : '';
+  if (type === 'invoice' && c.paid > 0) {
+    d.paid_to_date = r2(c.paid);
+    d.paid_note = c.pays.slice().sort((a, b) => String(a.pay_date).localeCompare(String(b.pay_date))).map(p => fmtShort(p.pay_date)).join(', ');
+  }
+  return d;
+}
+
+// The printed page, in Henry's two designs
+function qPaperHtml(rec) {
+  const st = qSettings();
+  const isQuote = rec.doc_type === 'quote';
+  const b = rec.business || qBusiness(rec.profile, rec.pay_to, st);
+  const cb = rec.profile === 'cb';
+  const letter = esc(((b.businessName || 'H').trim().charAt(0) || 'H').toUpperCase());
+  const brand = cb && /^\s*cunningham\s*(&|and)\s*baker\s*$/i.test(b.businessName || '')
+    ? 'Cunningham <span class="cf-fix">&amp;</span> Baker' : esc(b.businessName || '');
+  const cu = rec.customer || {};
+  const paid = num(rec.paid_to_date);
+  const cats = (rec.categories || []).map(cat => {
+    const lines = (cat.lines || []).filter(l => l && String(l).trim());
+    if (!cat.heading && !lines.length) return '';
+    return `<div class="inv-category"><h4>${esc(cat.heading || '')}</h4>${lines.map(l => `<p>${esc(l)}</p>`).join('')}</div>`;
+  }).join('');
+  return `<div class="inv-paper ${cb ? 'cf' : ''}">
+    <div class="inv-trim"></div>
+    <div class="inv-band">${cb ? `<img class="cf-logo" src="img/cb-banner.jpg" alt="Cunningham &amp; Baker">` : `<div class="logo-badge">${letter}</div>`}</div>
+    <div class="inv-body">
+      <div class="inv-top-row">
+        <div><div class="inv-brand">${brand}${isQuote ? '<span class="inv-doctype">Quote</span>' : ''}</div>
+          ${b.tagline ? `<div class="inv-tagline">${esc(b.tagline)}</div>` : ''}</div>
+        <div class="inv-billed"><div class="label">${isQuote ? 'Quoted to' : 'Billed to'}</div>
+          <div class="name">${esc(cu.name || '—')}</div>
+          ${cu.addr1 ? `<div>${esc(cu.addr1)}</div>` : ''}${cu.town ? `<div>${esc(cu.town)}</div>` : ''}${cu.postcode ? `<div>${esc(cu.postcode)}</div>` : ''}
+          <div class="ref">*${esc(rec.number ?? '')}${rec.doc_date ? `<span class="inv-date"> · ${esc(fmtDate(rec.doc_date))}</span>` : ''}</div></div>
+      </div>
+      <hr class="inv-header-rule">
+      <div class="inv-services-title">${isQuote ? 'Proposed Works' : 'Services Provided'}</div>
+      <hr class="inv-rule">
+      ${cats}
+      ${!isQuote && (b.sortCode || b.accountNumber) ? `<div class="inv-bank"><strong>Bank Details</strong>
+        ${b.accountName ? `<div><span class="bk">Account name:</span> ${esc(b.accountName)}</div>` : ''}
+        ${b.sortCode ? `<div><span class="bk">Sort code:</span> ${esc(b.sortCode)}</div>` : ''}
+        ${b.accountNumber ? `<div><span class="bk">Account number:</span> ${esc(b.accountNumber)}</div>` : ''}
+        <div><span class="bk">Reference:</span> ${esc(rec.number ?? '')}</div></div>` : ''}
+      <hr class="inv-rule">
+      ${paid > 0 && !isQuote
+        ? `<div class="inv-sub-row"><span>Total for all materials and labour:</span><span class="num">${qMoney(rec.total)}</span></div>
+           <div class="inv-sub-row"><span>Less amount already paid${rec.paid_note ? ` (${esc(rec.paid_note)})` : ''}:</span><span class="num">−${qMoney(paid)}</span></div>
+           <div class="inv-total-row"><span>Balance due:</span><span class="num">${qMoney(num(rec.total) - paid)}</span></div>`
+        : `<div class="inv-total-row"><span>${isQuote ? 'Total Estimated Cost:' : 'Total Cost for all materials and labour:'}</span><span class="num">${qMoney(rec.total)}</span></div>`}
+      <hr class="inv-rule">
+    </div>
+    <div class="inv-footer">
+      <div>${b.phone ? `<div>${esc(b.phone)}</div>` : ''}${b.email ? `<div>${esc(b.email)}</div>` : ''}</div>
+      <div class="right"><strong>${esc(b.businessName || '')}</strong>${String(b.address || '').split('\n').filter(Boolean).map(l => `<div>${esc(l)}</div>`).join('')}</div>
+    </div>
+    ${cb ? '<div class="inv-band cf-tagline">Air Conditioning<i>&bull;</i>Bathrooms<i>&bull;</i>Plumbing &amp; Heating</div>' : '<div class="inv-band"></div>'}
+    <div class="inv-trim"></div>
+  </div>`;
+}
+// Business & bank details printed on a document
+function qBusiness(profile, payTo, st = qSettings()) {
+  const p = st[profile] || st.cb;
+  const b = { businessName: p.businessName, tagline: p.tagline, phone: p.phone, email: p.email, address: p.address, accountName: p.accountName, sortCode: p.sortCode, accountNumber: p.accountNumber };
+  if (profile === 'cb' && payTo === 'second') Object.assign(b, { accountName: p.altAccountName || '', sortCode: p.altSortCode || '', accountNumber: p.altAccountNumber || '' });
+  return b;
+}
+
+function qBizSwitch(active, act = 'qProfile') {
+  return `<div class="q-biz" role="tablist">${Object.entries(Q_PROFILES).map(([k, p]) =>
+    `<button type="button" class="${active === k ? 'on' : ''}" data-act="${act}" data-p="${k}">${k === 'cb' ? '<img src="img/house-gold.png" alt="">' : '<span class="q-h">H</span>'}<span>${p.label}</span></button>`).join('')}</div>`;
+}
+// Quotes & invoices already made for a job (shown on the job page)
+function jobDocsHtml(j) {
+  const list = qDocs().filter(d => d.job_id === j.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  if (!list.length) return '';
+  return `<section class="card"><h3>Quotes &amp; invoices</h3>${list.map(d => `<a class="kv link" href="#/quotes/view/${d.id}"><span>${d.doc_type === 'quote' ? 'Quote' : 'Invoice'} *${d.number} <em class="muted">${fmtShort(d.doc_date)}</em></span><b>${qMoney(d.total)}</b></a>`).join('')}</section>`;
+}
+function qSubNav(on) {
+  const n = qDocs().length;
+  return `<div class="q-subnav">
+    <a href="#/quotes" class="${on === 'new' ? 'on' : ''}">${ICON.plus} New</a>
+    <a href="#/quotes/saved" class="${on === 'saved' ? 'on' : ''}">${ICON.doc} Saved${n ? ` (${n})` : ''}</a>
+    <a href="#/quotes/settings" class="${on === 'settings' ? 'on' : ''}">${ICON.cog} Details</a>
+  </div>`;
+}
+
+function quotesView({ id, extra }) {
+  qLoadFonts();
+  if (S.data.docsMissing) return layout({ title: 'Quotes', body: '<div class="empty">Quotes need the database set up.</div>' });
+  if (id === 'saved') return qSavedView();
+  if (id === 'settings') return qSettingsView();
+  if (id === 'view') return qDocView(extra);
+  if (id === 'job-quote' || id === 'job-invoice') {
+    // #/quotes/job-quote/<jobId>: open this job's quote/invoice, or start one filled in from the job
+    const type = id === 'job-quote' ? 'quote' : 'invoice';
+    const j = jobById(extra);
+    if (j) {
+      const existing = qDocs().filter(d => d.job_id === j.id && d.doc_type === type).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+      if (existing) { setTimeout(() => go(`#/quotes/view/${existing.id}`), 0); return layout({ title: 'Quotes', body: '' }); }
+      S.qd = qFromJob(j, type); qKeep();
+    }
+    setTimeout(() => history.replaceState(null, '', '#/quotes'), 0);
+  }
+  return qEditView();
+}
+
+function qEditView() {
+  const d = qDraft();
+  const st = qSettings();
+  const isQuote = d.doc_type === 'quote';
+  const j = d.job_id ? jobById(d.job_id) : null;
+  const editing = d.id ? qDocs().find(x => x.id === d.id) : null;
+  const nextNo = editing ? editing.number : qNextNumber(d.doc_type, d.profile);
+  const p = st[d.profile];
+  const showPay = d.profile === 'cb' && !isQuote && (p.altSortCode || p.altAccountNumber);
+  const body = `
+  ${qSubNav('new')}
+  ${qBizSwitch(d.profile)}
+  <div class="q-type">
+    <button type="button" class="${isQuote ? 'on' : ''}" data-act="qType" data-t="quote">Quote</button>
+    <button type="button" class="${!isQuote ? 'on' : ''}" data-act="qType" data-t="invoice">Invoice</button>
+  </div>
+  ${editing ? `<div class="note">Editing ${isQuote ? 'quote' : 'invoice'} *${editing.number}. <button class="link-btn" data-act="qNew">Start a new one instead</button></div>` : ''}
+
+  <section class="card">
+    <h3>Fill from a job</h3>
+    <div class="job-pick" id="q-jobpick">${j
+      ? `<div class="job-chosen">${ICON.jobs}<span><b>${esc(jobName(j))}</b>${j.customer_name ? `<span class="muted small"> · ${esc(j.customer_name)}</span>` : ''}</span><button type="button" data-act="qClearJob" aria-label="Unlink job">×</button></div>`
+      : `<input type="search" id="q-jobq" placeholder="Type an address or name to fill everything in…" autocomplete="off" data-input="qJobQ" value="${esc(S.qJobQ || '')}"><div id="q-suggest">${jobSuggestHtml(S.qJobQ, 'qPickJob')}</div>`}
+    </div>
+    ${j ? '<p class="muted small">Customer, address, works and price came from the job — change anything below.</p>' : ''}
+  </section>
+
+  <section class="card q-form">
+    <h3>Customer</h3>
+    <label>Name<input data-qf="customer.name" value="${esc(d.customer.name)}" autocomplete="off"></label>
+    <label>Address<input data-qf="customer.addr1" value="${esc(d.customer.addr1)}" placeholder="Street" autocomplete="off"></label>
+    <div class="two"><label>Town<input data-qf="customer.town" value="${esc(d.customer.town)}" autocomplete="off"></label>
+      <label>Postcode<input data-qf="customer.postcode" value="${esc(d.customer.postcode)}" autocomplete="off"></label></div>
+    <div class="two"><label>Date<input type="date" data-qf="doc_date" value="${esc(d.doc_date || '')}"></label>
+      <label>${isQuote ? 'Quote' : 'Invoice'} number<input type="number" inputmode="numeric" data-qf="number" value="${esc(d.number ?? '')}" placeholder="${nextNo}"></label></div>
+    ${showPay ? `<div class="field-label">Bank details on the invoice</div>
+      <div class="seg3">${[['primary', p.accountName || 'Main account'], ['second', p.altAccountName || 'Second account']].map(([k, l]) =>
+        `<label class="${(d.pay_to || 'primary') === k ? 'on' : ''}"><input type="radio" name="q-payto" value="${k}" data-qf="pay_to" ${(d.pay_to || 'primary') === k ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div>` : ''}
+  </section>
+
+  <section class="card q-form">
+    <h3>${isQuote ? 'Proposed works' : 'Services provided'}</h3>
+    <div id="q-cats">${qCatsHtml(d)}</div>
+    <button type="button" class="btn small" data-act="qAddCat">${ICON.plus} Add heading</button>
+  </section>
+
+  <section class="card q-form">
+    <h3>Total</h3>
+    <label>${isQuote ? 'Estimated total cost (£)' : 'Final total for all materials and labour (£)'}<input type="number" inputmode="decimal" step="0.01" data-qf="total" value="${esc(d.total)}"></label>
+    ${!isQuote ? `<div class="two"><label>Already paid (£)<input type="number" inputmode="decimal" step="0.01" data-qf="paid_to_date" value="${num(d.paid_to_date) || ''}" placeholder="0"></label>
+      <label>Paid when <span class="muted small">(optional)</span><input data-qf="paid_note" value="${esc(d.paid_note || '')}" placeholder="e.g. 2 November"></label></div>` : ''}
+  </section>
+
+  <button class="btn primary wide big" data-act="qGenerate">${editing ? 'Save changes' : `Make ${isQuote ? 'quote' : 'invoice'}`} →</button>
+  <p class="muted small center">Saves it to Saved, then you can send it as a PDF.</p>`;
+  return layout({ title: 'Quotes & invoices', body });
+}
+
+function qCatsHtml(d) {
+  return d.categories.map((c, ci) => `<div class="q-cat">
+    <div class="q-cat-head"><input class="q-heading" data-qcat="${ci}" value="${esc(c.heading)}" placeholder="Heading, e.g. Preparation">
+      <button type="button" class="q-x" data-act="qDelCat" data-i="${ci}" aria-label="Remove heading">×</button></div>
+    ${c.lines.map((l, li) => `<div class="q-line"><textarea rows="1" data-qline="${ci}:${li}" placeholder="Work done">${esc(l)}</textarea>
+      ${c.lines.length > 1 ? `<button type="button" class="q-x" data-act="qDelLine" data-i="${ci}:${li}" aria-label="Remove line">×</button>` : ''}</div>`).join('')}
+    <button type="button" class="link-btn small" data-act="qAddLine" data-i="${ci}">+ Add line</button>
+  </div>`).join('') || '<p class="muted small">No headings yet.</p>';
+}
+function qRefreshCats() {
+  const el = document.getElementById('q-cats');
+  if (el) { el.innerHTML = qCatsHtml(qDraft()); el.querySelectorAll('textarea').forEach(growChat); }
+}
+
+function qDocView(id) {
+  const rec = qDocs().find(x => x.id === id);
+  if (!rec) return layout({ title: 'Quotes', back: true, body: '<div class="empty">Not found — it may have been deleted.</div>' });
+  const isQuote = rec.doc_type === 'quote';
+  const j = rec.job_id ? jobById(rec.job_id) : null;
+  const inv = isQuote ? qDocs().find(x => x.from_quote === rec.id) : null;
+  const body = `
+  <div class="doc-bar q-bar">
+    <a class="btn small" href="#/quotes/saved">${ICON.back} Saved</a>
+    <button class="btn small" data-act="qEdit" data-id="${rec.id}">Edit</button>
+    <div class="grow"></div>
+    <button class="btn small" data-act="print">Print</button>
+    <button class="btn small primary" data-act="qSend" data-id="${rec.id}">Send PDF</button>
+  </div>
+  <div class="q-meta muted small">${esc(Q_PROFILES[rec.profile]?.label || '')} ${isQuote ? 'quote' : 'invoice'} *${rec.number}${j ? ` · <a href="#/job/${j.id}">${esc(jobName(j))}</a>` : ''}</div>
+  ${qPaperHtml(rec)}
+  <div class="q-after">
+    ${isQuote ? (inv ? `<a class="btn wide" href="#/quotes/view/${inv.id}">Open invoice *${inv.number}</a>` : `<button class="btn primary wide" data-act="qConvert" data-id="${rec.id}">Job done — turn into an invoice →</button>`) : ''}
+    <button class="btn wide" data-act="qCopy" data-id="${rec.id}">Copy into a new one</button>
+    <button class="link-btn small danger-text" data-act="qDelete" data-id="${rec.id}">Delete</button>
+  </div>`;
+  return layout({ title: `${isQuote ? 'Quote' : 'Invoice'} *${rec.number}`, back: true, body, nav: false });
+}
+
+function qSavedList() {
+  const q = String(S.qSavedQ || '').toLowerCase().trim();
+  const f = S.qSavedF || 'all';
+  return qDocs().filter(d => (f === 'all' || d.profile === f || d.doc_type === f))
+    .filter(d => !q || [d.customer?.name, d.customer?.addr1, d.customer?.town, d.customer?.postcode, String(d.number)].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+}
+function qSavedView() {
+  const f = S.qSavedF || 'all';
+  const list = qSavedList();
+  const chip = (k, l) => `<button type="button" class="chip ${f === k ? 'on' : ''}" data-act="qSavedFilter" data-f="${k}">${l}</button>`;
+  const body = `
+  ${qSubNav('saved')}
+  <input type="search" class="q-search" placeholder="Search name, address or number" value="${esc(S.qSavedQ || '')}" data-input="qSavedQ">
+  <div class="chips">${chip('all', 'All')}${chip('quote', 'Quotes')}${chip('invoice', 'Invoices')}${chip('cb', 'C&B')}${chip('htp', 'Henry The Plumber')}</div>
+  <section class="card q-saved" id="q-saved-list">${qSavedRows(list)}</section>`;
+  return layout({ title: 'Saved quotes & invoices', body });
+}
+function qSavedRows(list) {
+  return list.map(d => `<a class="q-row" href="#/quotes/view/${d.id}">
+      <div><b>${esc(d.customer?.name || 'No name')}</b><span class="q-tag ${d.doc_type}">${d.doc_type === 'quote' ? 'Quote' : 'Invoice'}</span>
+        <div class="muted small">*${d.number} · ${esc(Q_PROFILES[d.profile]?.short || '')} · ${fmtDate(d.doc_date)}${d.customer?.addr1 ? ` · ${esc(d.customer.addr1)}` : ''}</div></div>
+      <b class="num">${qMoney(d.total)}</b></a>`).join('') || '<p class="muted small">Nothing saved yet.</p>';
+}
+
+function qSettingsView() {
+  const st = qSettings();
+  const pk = S.qSetP || 'cb';
+  const p = st[pk];
+  const f = (k, l, ph = '', type = 'text') => `<label>${l}<input type="${type}" name="${k}" value="${esc(p[k] ?? '')}" placeholder="${esc(ph)}"></label>`;
+  const body = `
+  ${qSubNav('settings')}
+  ${qBizSwitch(pk, 'qSetProfile')}
+  <form data-form="qSettings" class="form">
+    <input type="hidden" name="_profile" value="${pk}">
+    <section class="card">
+      <h3>Business details</h3>
+      <p class="muted small">Used on ${esc(Q_PROFILES[pk].label)} quotes and invoices.</p>
+      ${f('businessName', 'Business name')}
+      ${f('tagline', 'Tagline (optional, shown under the name)')}
+      ${f('phone', 'Phone')}${f('email', 'Email')}
+      <label>Business address (footer)<textarea name="address" rows="3">${esc(p.address || '')}</textarea></label>
+    </section>
+    <section class="card">
+      <h3>Bank details</h3>
+      <p class="muted small">Only printed on invoices.</p>
+      ${f('accountName', 'Account name')}${f('sortCode', 'Sort code', '00-00-00')}${f('accountNumber', 'Account number')}
+    </section>
+    ${pk === 'cb' ? `<section class="card"><h3>Second bank account</h3><p class="muted small">Choose which account goes on each invoice when you make it.</p>
+      ${f('altAccountName', 'Account name')}${f('altSortCode', 'Sort code', '00-00-00')}${f('altAccountNumber', 'Account number')}</section>` : ''}
+    <section class="card">
+      <h3>Numbering</h3>
+      <label>Next ${esc(Q_PROFILES[pk].label)} quote number<input type="number" name="quoteStart" value="${qNextNumber('quote', pk)}"></label>
+      <label>Next invoice number <span class="muted small">(one running number for both businesses)</span><input type="number" name="_invoiceStart" value="${qNextNumber('invoice', pk)}"></label>
+      <p class="muted small">Numbers carry on from the highest one saved; set them higher here to jump ahead.</p>
+    </section>
+    <button class="btn primary wide big">Save details</button>
+  </form>`;
+  return layout({ title: 'Quote details', body });
+}
+
 // Dark mode: remembered on each phone
 const isDark = () => document.documentElement.dataset.theme === 'dark';
 const themeSwitch = () => `<button class="theme-switch" data-act="toggleTheme" role="switch" aria-checked="${isDark()}" aria-label="Dark mode"><i>${isDark() ? ICON.moon : ICON.sun}</i></button>`;
@@ -1140,7 +1500,7 @@ function jobView({ id }) {
       <div class="hero-who">${esc(jobSub(j) || 'No customer')}${jobAddr(j) && j.postcode ? ` · ${esc(j.postcode)}` : ''}</div>
       <div class="quick">
         ${phone ? `<a href="tel:${esc(phone)}">${ICON.phone}<span>Call</span></a>` : '<span class="off">' + ICON.phone + '<span>Call</span></span>'}
-        <a href="#/doc/${j.id}/${j.status === 'quoted' || j.status === 'declined' ? 'quote' : 'invoice'}">${ICON.doc}<span>${j.status === 'quoted' || j.status === 'declined' ? 'Quote' : 'Invoice'}</span></a>
+        <a href="#/quotes/job-${j.status === 'quoted' || j.status === 'declined' ? 'quote' : 'invoice'}/${j.id}">${ICON.doc}<span>${j.status === 'quoted' || j.status === 'declined' ? 'Quote' : 'Invoice'}</span></a>
         ${addr ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener">${ICON.pin}<span>Directions</span></a>` : '<span class="off">' + ICON.pin + '<span>Directions</span></span>'}
       </div>
     </section>
@@ -1207,9 +1567,10 @@ function overviewTab(j, c) {
     ${others.length ? `<h4>Other jobs for ${esc(j.customer_name)}</h4>${others.map(o => `<a class="kv link" href="#/job/${o.id}"><span>${esc(jobName(o))}${jobAddr(o) ? ` <em class="muted">${esc(o.title || '')}</em>` : ''}</span><b>${pill(o.status)}</b></a>`).join('')}` : ''}
   </section>
 
+  ${jobDocsHtml(j)}
   <div class="action-grid">
-    <a class="btn" href="#/doc/${j.id}/quote">Quote PDF</a>
-    <a class="btn" href="#/doc/${j.id}/invoice">Invoice PDF</a>
+    <a class="btn" href="#/quotes/job-quote/${j.id}">${ICON.doc} Quote</a>
+    <a class="btn" href="#/quotes/job-invoice/${j.id}">${ICON.doc} Invoice</a>
     ${S.data.eventsMissing ? '' : `<button class="btn" data-act="evSheet" data-job="${j.id}">+ Calendar</button>`}
     <button class="btn" data-act="duplicate" data-id="${j.id}">Duplicate</button>
     ${S.data.messagesMissing ? '' : `<button class="btn" data-act="msgSheet" data-job="${j.id}">${ICON.chat} Message ${esc(nameOf(otherOf(S.me)))}</button>`}
@@ -2284,7 +2645,7 @@ function docView({ id, extra }) {
   return `
   <div class="doc-bar">
     <button class="btn small" data-act="back">${ICON.back} Back</button>
-    <a class="btn small" href="#/doc/${j.id}/${isQuote ? 'invoice' : 'quote'}">${isQuote ? 'Invoice' : 'Quote'}</a>
+    <a class="btn small" href="#/quotes/job-${isQuote ? 'invoice' : 'quote'}/${j.id}">${isQuote ? 'Invoice' : 'Quote'}</a>
     <div class="grow"></div>
     <button class="btn small" data-act="print" title="Print">Print</button>
     <button class="btn small primary" data-act="sendPdf" data-id="${j.id}" data-type="${isQuote ? 'quote' : 'invoice'}">Send PDF</button>
@@ -2302,11 +2663,12 @@ function loadScript(src) {
     document.head.appendChild(el);
   });
 }
-async function makePdf(filename) {
+async function makePdf(filename, selector = '.doc', width = 760) {
   await loadScript('vendor/html2pdf.bundle.min.js');
-  const src = document.querySelector('.doc');
+  await document.fonts?.ready;
+  const src = document.querySelector(selector);
   const holder = document.createElement('div');
-  holder.style.cssText = 'position:absolute;left:0;top:0;width:760px;background:#fff;z-index:-1;pointer-events:none';
+  holder.style.cssText = `position:absolute;left:0;top:0;width:${width}px;background:#fff;z-index:-1;pointer-events:none`;
   const clone = src.cloneNode(true);
   clone.classList.add('pdf');
   holder.appendChild(clone);
@@ -2314,7 +2676,7 @@ async function makePdf(filename) {
   try {
     const blob = await window.html2pdf().set({
       margin: [8, 8, 8, 8], image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, backgroundColor: '#ffffff', windowWidth: 760, width: 760, scrollX: 0, scrollY: -window.scrollY, x: 0, y: 0 },
+      html2canvas: { scale: 2, backgroundColor: '#ffffff', windowWidth: width, width, scrollX: 0, scrollY: -window.scrollY, x: 0, y: 0 },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'] },
     }).from(clone).outputPdf('blob');
     return new File([blob], filename, { type: 'application/pdf' });
@@ -2489,6 +2851,21 @@ function getPayer() { try { const v = localStorage.getItem('cb-payer'); return v
 function setPayer(p) { if (p !== 'a' && p !== 'b') return; S.payer = p; try { localStorage.setItem('cb-payer', p); } catch { /* ignore */ } }
 
 const FORMS = {
+  async qSettings(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      const pk = fd.get('_profile');
+      const cur = set().doc_profiles || {};
+      const prof = { ...(cur[pk] || {}) };
+      for (const [k, v] of fd.entries()) if (!k.startsWith('_')) prof[k] = k === 'quoteStart' ? (parseInt(v, 10) || 1) : String(v).trim();
+      const invoiceStart = parseInt(fd.get('_invoiceStart'), 10) || cur.invoiceStart || Q_INVOICE_START;
+      const data = { ...set(), doc_profiles: { ...cur, [pk]: prof, invoiceStart } };
+      S.lastWrite = Date.now();
+      await db.saveSettings(data);
+      S.data.settings = data;
+      delete form.dataset.dirty;
+      toast('Details saved'); render();
+    });
+  },
   async inbox(fd, form) {
     const text = (S.inboxText || fd.get('text') || '').trim();
     const files = S.inboxFiles.slice();
@@ -2833,6 +3210,145 @@ const FORMS = {
 };
 
 const ACT = {
+  qProfile(d) {
+    const q = qDraft();
+    if (q.profile === d.p) return;
+    q.profile = d.p;
+    localStorage.setItem('cb-quote-profile', d.p);
+    // swap the empty starter headings for this business's ones
+    const blank = q.categories.every(c => !c.lines.some(l => String(l).trim()));
+    if (blank && !q.job_id) q.categories = Q_PROFILES[d.p].starter.map(h => ({ heading: h, lines: [''] }));
+    if (!q.id) q.number = null;
+    qKeep(); render();
+  },
+  qType(d) {
+    const q = qDraft();
+    if (q.doc_type === d.t) return;
+    q.doc_type = d.t;
+    if (!q.id) q.number = null;
+    if (d.t === 'invoice' && q.job_id && !num(q.paid_to_date)) {
+      const j = jobById(q.job_id);
+      if (j) { const f = qFromJob(j, 'invoice'); q.paid_to_date = f.paid_to_date; q.paid_note = f.paid_note; }
+    }
+    qKeep(); render();
+  },
+  qPickJob(d) {
+    const j = jobById(d.id);
+    if (!j) return;
+    const keep = qDraft();
+    S.qd = { ...qFromJob(j, keep.doc_type), id: keep.id, number: keep.id ? keep.number : null, profile: keep.profile };
+    S.qJobQ = '';
+    qKeep(); render();
+    toast('Filled in from the job');
+  },
+  qClearJob() { qDraft().job_id = null; qKeep(); render(); setTimeout(() => document.getElementById('q-jobq')?.focus(), 30); },
+  qNew() { S.qd = qBlank(qDraft().profile, qDraft().doc_type); qKeep(); render(); window.scrollTo(0, 0); },
+  qAddCat() {
+    qDraft().categories.push({ heading: '', lines: [''] }); qKeep(); qRefreshCats();
+    const hs = document.querySelectorAll('#q-cats .q-heading'); hs[hs.length - 1]?.focus();
+  },
+  qDelCat(d) { qDraft().categories.splice(+d.i, 1); qKeep(); qRefreshCats(); },
+  qAddLine(d) {
+    const c = qDraft().categories[+d.i]; c.lines.push(''); qKeep(); qRefreshCats();
+    document.querySelector(`#q-cats [data-qline="${d.i}:${c.lines.length - 1}"]`)?.focus();
+  },
+  qDelLine(d) { const [ci, li] = d.i.split(':').map(Number); qDraft().categories[ci].lines.splice(li, 1); qKeep(); qRefreshCats(); },
+  async qGenerate(d, el) {
+    const q = qDraft();
+    if (!String(q.customer.name || '').trim()) { toast('Add the customer name first', true); document.querySelector('[data-qf="customer.name"]')?.focus(); return; }
+    await busy(el, async () => {
+      const existing = q.id ? qDocs().find(x => x.id === q.id) : null;
+      const number = q.number || (existing ? existing.number : qNextNumber(q.doc_type, q.profile));
+      const clash = qDocs().find(x => x.id !== q.id && x.doc_type === q.doc_type && x.number === number && (q.doc_type === 'invoice' || x.profile === q.profile));
+      if (clash) throw new Error(`${q.doc_type === 'quote' ? 'Quote' : 'Invoice'} *${number} is already used (${clash.customer?.name || 'another one'}) — pick another number`);
+      const row = {
+        profile: q.profile, doc_type: q.doc_type, number, job_id: q.job_id || null, from_quote: q.from_quote || null,
+        customer: q.customer, doc_date: q.doc_date || today(),
+        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.lines.length), // headings left with no lines aren't printed
+        total: r2(num(q.total)), pay_to: q.pay_to || 'primary',
+        paid_to_date: q.doc_type === 'invoice' ? r2(num(q.paid_to_date)) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
+        business: qBusiness(q.profile, q.pay_to), updated_at: new Date().toISOString(),
+      };
+      const saved = await saveRow('docs', q.id || null, row);
+      localStorage.setItem('cb-quote-profile', q.profile);
+      S.qd = qBlank(q.profile, q.doc_type); qKeep();
+      toast(existing ? 'Saved changes' : `${q.doc_type === 'quote' ? 'Quote' : 'Invoice'} *${number} saved`);
+      go(`#/quotes/view/${saved.id}`);
+    });
+  },
+  qEdit(d) {
+    const rec = qDocs().find(x => x.id === d.id);
+    if (!rec) return;
+    S.qd = {
+      id: rec.id, profile: rec.profile, doc_type: rec.doc_type, number: rec.number, job_id: rec.job_id, from_quote: rec.from_quote,
+      customer: { name: '', addr1: '', town: '', postcode: '', ...(rec.customer || {}) }, doc_date: rec.doc_date,
+      categories: (rec.categories || []).map(c => ({ heading: c.heading || '', lines: c.lines?.length ? [...c.lines] : [''] })),
+      total: String(rec.total ?? ''), pay_to: rec.pay_to, paid_to_date: num(rec.paid_to_date), paid_note: rec.paid_note || '',
+    };
+    qKeep(); go('#/quotes');
+  },
+  qCopy(d) {
+    ACT.qEdit(d);
+    Object.assign(S.qd, { id: null, number: null, from_quote: null, doc_date: today() });
+    qKeep(); render(); toast('Copied — change what you need, then save');
+  },
+  qConvert(d) {
+    const rec = qDocs().find(x => x.id === d.id);
+    if (!rec) return;
+    ACT.qEdit(d);
+    Object.assign(S.qd, { id: null, number: null, doc_type: 'invoice', from_quote: rec.id, doc_date: today(), pay_to: 'primary' });
+    const j = rec.job_id ? jobById(rec.job_id) : null;
+    if (j) { const f = qFromJob(j, 'invoice'); S.qd.paid_to_date = f.paid_to_date; S.qd.paid_note = f.paid_note; }
+    qKeep(); render(); toast('Turned into an invoice — check it, then save');
+  },
+  qDelete(d) {
+    const rec = qDocs().find(x => x.id === d.id);
+    if (!rec) return;
+    openSheet(`<div class="form">${sheetHead(`Delete ${rec.doc_type} *${rec.number}?`)}
+      <p>${esc(rec.customer?.name || '')} · ${qMoney(rec.total)}. This can't be undone.</p>
+      <button class="btn danger wide big" data-act="qDeleteGo" data-id="${rec.id}">Delete</button></div>`);
+  },
+  async qDeleteGo(d) {
+    try { await deleteRow('docs', d.id); closeSheet(); toast('Deleted'); go('#/quotes/saved'); }
+    catch (e) { toast(friendly(e), true); }
+  },
+  qSavedFilter(d) { S.qSavedF = d.f; render(); },
+  qSetProfile(d) { S.qSetP = d.p; render(); },
+  async qSend(d, el) {
+    const rec = qDocs().find(x => x.id === d.id);
+    if (!rec) return;
+    const isQuote = rec.doc_type === 'quote';
+    const biz = rec.business?.businessName || Q_PROFILES[rec.profile].label;
+    const name = `${biz.replace(/[^\w]+/g, '')} ${isQuote ? 'Quote' : 'Invoice'} ${rec.number}${rec.customer?.name ? ` ${rec.customer.name.replace(/[^\w ]+/g, '')}` : ''}.pdf`;
+    const text = `${biz} ${isQuote ? 'quote' : 'invoice'} ${rec.number}`;
+    const j = rec.job_id ? jobById(rec.job_id) : null;
+    const mark = async () => {
+      if (!j) return;
+      if (isQuote && !j.quote_date && j.status === 'quoted') await saveRow('jobs', j.id, { quote_date: today() }).catch(console.error);
+      if (!isQuote) await setMark(j, 'chased_at').catch(console.error);
+    };
+    if (S.readyPdf && S.readyPdf.key === `doc/${rec.id}`) {
+      const file = S.readyPdf.file; S.readyPdf = null; el.textContent = 'Send PDF';
+      try { await navigator.share({ files: [file], title: file.name, text }); await mark(); }
+      catch (e) { if (e.name !== 'AbortError') { saveFile(file); toast('PDF downloaded instead'); } }
+      return;
+    }
+    const label = el.textContent;
+    el.textContent = 'Making PDF…';
+    await busy(el, async () => {
+      const file = await makePdf(name, '.inv-paper', 700);
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: name, text }); }
+        catch (e) {
+          if (e.name === 'AbortError') return;
+          if (e.name === 'NotAllowedError') { S.readyPdf = { key: `doc/${rec.id}`, file }; setTimeout(() => { el.textContent = 'PDF ready — tap to send'; el.classList.add('pulse'); }, 0); return; }
+          throw e;
+        }
+      } else { saveFile(file); toast('PDF downloaded'); }
+      await mark();
+    });
+    if (!S.readyPdf) el.textContent = label;
+  },
   inboxPickJob(d) { S.inboxJob = d.id; S.inboxJobQ = ''; const el = document.getElementById('ib-jobpick'); if (el) el.innerHTML = inboxJobPickHtml(); },
   inboxClearJob() {
     S.inboxJob = null; S.inboxJobQ = '';
@@ -3353,6 +3869,28 @@ document.addEventListener('change', async e => {
   uploadPhotos(jobId, [...e.target.files], e.target);
 });
 
+// Quotes tab: typing into the form updates the draft without redrawing (keeps the keyboard up)
+function qSetField(el) {
+  const d = qDraft();
+  if (el.dataset.qf) {
+    const path = el.dataset.qf;
+    let v = el.value;
+    if (path === 'number') v = parseInt(v, 10) > 0 ? parseInt(v, 10) : null;
+    if (path === 'paid_to_date') v = num(v);
+    if (path.startsWith('customer.')) d.customer[path.slice(9)] = v; else d[path] = v;
+    if (path === 'pay_to') el.closest('.seg3')?.querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(el)));
+  } else if (el.dataset.qcat != null) {
+    d.categories[+el.dataset.qcat].heading = el.value;
+  } else if (el.dataset.qline) {
+    const [ci, li] = el.dataset.qline.split(':').map(Number);
+    d.categories[ci].lines[li] = el.value;
+    growChat(el);
+  } else return;
+  qKeep();
+}
+document.addEventListener('input', e => { if (e.target.closest?.('.q-form')) qSetField(e.target); });
+document.addEventListener('change', e => { if (e.target.closest?.('.q-form') && e.target.type === 'radio') qSetField(e.target); });
+
 // Drag invoices onto the inbox page (computer)
 ['dragenter', 'dragover'].forEach(t => document.addEventListener(t, e => {
   if (route().view !== 'inbox' || !e.dataTransfer?.types?.includes('Files')) return;
@@ -3370,6 +3908,7 @@ document.addEventListener('drop', e => {
 // To-do steps: Enter adds the step; ticking strikes it through
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'chat-jobq') { e.preventDefault(); document.querySelector('#chat-suggest .job-opt')?.click(); }
+  if (e.key === 'Enter' && e.target.id === 'q-jobq') { e.preventDefault(); document.querySelector('#q-suggest .job-opt')?.click(); }
   if (e.key === 'Enter' && e.target.id === 'ib-jobq') { e.preventDefault(); document.querySelector('#ib-suggest .job-opt')?.click(); }
   if (e.key === 'Enter' && e.target.id === 'step-new') { e.preventDefault(); ACT.stepAdd({}, e.target); }
   if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'chat-input' && !/iPhone|iPad|Android/.test(navigator.userAgent)) { e.preventDefault(); e.target.form.requestSubmit(); }
@@ -3386,6 +3925,8 @@ document.addEventListener('input', e => {
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJobQ') { S.chatJobQ = e.target.value; const el = document.getElementById('chat-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5); }
+  if (k === 'qJobQ') { S.qJobQ = e.target.value; const el = document.getElementById('q-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.qJobQ, 'qPickJob'); }
+  if (k === 'qSavedQ') { S.qSavedQ = e.target.value; const el = document.getElementById('q-saved-list'); if (el) el.innerHTML = qSavedRows(qSavedList()); }
   if (k === 'inboxText') S.inboxText = e.target.value;
   if (k === 'inboxJobQ') { S.inboxJobQ = e.target.value; const el = document.getElementById('ib-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.inboxJobQ); }
   if (k === 'inboxPayer') { S.inboxPayer = e.target.value; e.target.closest('.seg3').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target))); }

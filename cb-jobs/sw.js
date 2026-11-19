@@ -3,7 +3,7 @@
 // always comes live from Supabase (the app keeps its own last-loaded copy).
 //
 // When you update the app, bump VERSION (and the ?v= numbers in index.html).
-const VERSION = '20261118a';
+const VERSION = '20261119a';
 const CACHE = `cbjobs-${VERSION}`;
 
 const SHELL = [
@@ -19,6 +19,8 @@ const SHELL = [
   'icon-192.png',
   'img/house-gold.png',
   'img/house-deep.png',
+  'img/cb-banner.jpg',
+  `css/inv-fonts.css?v=${VERSION}`,
   'fonts/poppins-latin-400-normal.woff2',
   'fonts/poppins-latin-500-normal.woff2',
   'fonts/poppins-latin-600-normal.woff2',

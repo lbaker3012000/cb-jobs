@@ -320,3 +320,34 @@ do $$ begin
     alter publication supabase_realtime add table public.inbox_items;
   end if;
 end $$;
+
+-- Quotes & invoices made in the Quotes tab (added 19 Nov 2026)
+-- profile: 'cb' = Cunningham & Baker, 'htp' = Henry The Plumber
+create table if not exists public.docs (
+  id uuid primary key default gen_random_uuid(),
+  profile text not null default 'cb' check (profile in ('cb','htp')),
+  doc_type text not null default 'quote' check (doc_type in ('quote','invoice')),
+  number integer not null,
+  job_id uuid references public.jobs(id) on delete set null,
+  customer jsonb not null default '{}'::jsonb,     -- {name, addr1, town, postcode}
+  doc_date date not null default current_date,
+  categories jsonb not null default '[]'::jsonb,   -- [{heading, lines:[...]}]
+  total numeric(12,2) not null default 0,
+  pay_to text not null default 'primary' check (pay_to in ('primary','second')),
+  paid_to_date numeric(12,2) not null default 0,
+  paid_note text,
+  business jsonb,                                  -- business & bank details as printed
+  from_quote uuid references public.docs(id) on delete set null,
+  created_by text default lower(auth.jwt() ->> 'email'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists docs_job_idx on public.docs (job_id);
+alter table public.docs enable row level security;
+drop policy if exists "members only" on public.docs;
+create policy "members only" on public.docs for all to authenticated using (public.is_member()) with check (public.is_member());
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'docs') then
+    alter publication supabase_realtime add table public.docs;
+  end if;
+end $$;
