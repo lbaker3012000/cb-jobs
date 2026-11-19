@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119b';
-const VERSION_TAG = '20261119b';
+import { db, DEMO } from './db.js?v=20261119c';
+const VERSION_TAG = '20261119c';
 
-const APP_VERSION = '19 Nov 2026 (2)';
+const APP_VERSION = '19 Nov 2026 (3)';
 
 // ======================================================================
 // State & helpers
@@ -854,7 +854,7 @@ async function applyAction(a, keyMap) {
 const Q_PROFILES = {
   cb: {
     label: 'Cunningham & Baker', short: 'C&B',
-    starter: ['Works'],
+    starter: [''],
     defaults: {
       businessName: 'Cunningham & Baker', tagline: '', phone: '07534 632490', email: 'info@cunninghamandbaker.co.uk', address: '',
       accountName: 'Henry Cunningham', sortCode: '20-26-78', accountNumber: '13014363',
@@ -864,7 +864,7 @@ const Q_PROFILES = {
   },
   htp: {
     label: 'Henry The Plumber', short: 'Henry',
-    starter: ['Preparation', 'Plumbing'],
+    starter: [''],
     defaults: {
       businessName: 'Henry The Plumber', tagline: '', phone: '', email: '', address: '',
       accountName: 'Henry Cunningham', sortCode: '20-26-78', accountNumber: '13014363',
@@ -872,7 +872,6 @@ const Q_PROFILES = {
     },
   },
 };
-const Q_STARTERS = new Set(['works', 'preparation', 'plumbing']);
 const Q_INVOICE_START = 1089; // shared running invoice number for both businesses
 const qSettings = () => {
   const saved = set().doc_profiles || {};
@@ -910,7 +909,7 @@ function qBlank(profile = localStorage.getItem('cb-quote-profile') || 'cb', type
     id: null, profile, doc_type: type, number: null, job_id: null, from_quote: null,
     customer: { name: '', addr1: '', town: '', postcode: '' },
     doc_date: today(),
-    categories: Q_PROFILES[profile].starter.map(h => ({ heading: h, lines: [''] })),
+    categories: [{ heading: '', lines: [] }],
     total: '', pay_to: 'primary', paid_to_date: 0, paid_note: '',
   };
 }
@@ -938,8 +937,8 @@ function qFromJob(j, type) {
   d.customer = { name: j.customer_name || '', addr1: lines[0] || '', town: lines.slice(1).join(', '), postcode: j.postcode || '' };
   d.doc_date = type === 'quote' ? (j.quote_date || today()) : (j.finished_date || today());
   d.categories = [
-    { heading: j.title || 'Works', lines: work.length ? work : [''] },
-    { heading: 'Materials', lines: ['All materials included'] },
+    { heading: j.title || 'Works', lines: work },
+    { heading: 'All materials included', lines: [] },
   ];
   d.total = c.gross ? String(r2(c.gross)) : '';
   if (type === 'invoice' && c.paid > 0) {
@@ -963,7 +962,7 @@ function qPaperHtml(rec) {
   const cats = (rec.categories || []).map(cat => {
     const lines = (cat.lines || []).filter(l => l && String(l).trim());
     if (!cat.heading && !lines.length) return '';
-    return `<div class="inv-category"><h4>${esc(cat.heading || '')}</h4>${lines.map(l => `<p>${esc(l)}</p>`).join('')}</div>`;
+    return `<div class="inv-category${lines.length ? '' : ' solo'}">${cat.heading ? `<h4>${esc(cat.heading)}</h4>` : ''}${lines.map(l => `<p>${esc(l)}</p>`).join('')}</div>`;
   }).join('');
   return `<div class="inv-paper ${cb ? 'cf' : ''}">
     <div class="inv-trim"></div>
@@ -1091,8 +1090,9 @@ function qEditView() {
 
   <section class="card q-form">
     <h3>${isQuote ? 'Proposed works' : 'Services provided'}</h3>
+    <p class="muted small">One box per item. Add detail underneath only for bigger jobs.</p>
     <div id="q-cats">${qCatsHtml(d)}</div>
-    <button type="button" class="btn small" data-act="qAddCat">${ICON.plus} Add heading</button>
+    <button type="button" class="btn small" data-act="qAddCat">${ICON.plus} Add item</button>
   </section>
 
   <section class="card q-form">
@@ -1109,12 +1109,12 @@ function qEditView() {
 
 function qCatsHtml(d) {
   return d.categories.map((c, ci) => `<div class="q-cat">
-    <div class="q-cat-head"><input class="q-heading" data-qcat="${ci}" value="${esc(c.heading)}" placeholder="Heading, e.g. Bathroom">
-      <button type="button" class="q-x" data-act="qDelCat" data-i="${ci}" aria-label="Remove heading">×</button></div>
-    ${c.lines.map((l, li) => `<div class="q-line"><textarea rows="1" data-qline="${ci}:${li}" placeholder="What's being done, e.g. Replace bath trap">${esc(l)}</textarea>
-      ${c.lines.length > 1 ? `<button type="button" class="q-x" data-act="qDelLine" data-i="${ci}:${li}" aria-label="Remove line">×</button>` : ''}</div>`).join('')}
-    <button type="button" class="link-btn small" data-act="qAddLine" data-i="${ci}">+ Add line</button>
-  </div>`).join('') || '<p class="muted small">No headings yet.</p>';
+    <div class="q-cat-head"><textarea rows="1" class="q-heading" data-qcat="${ci}" placeholder="e.g. Replace bath trap">${esc(c.heading)}</textarea>
+      ${d.categories.length > 1 || c.lines.length ? `<button type="button" class="q-x" data-act="qDelCat" data-i="${ci}" aria-label="Remove item">×</button>` : ''}</div>
+    ${c.lines.map((l, li) => `<div class="q-line"><textarea rows="1" data-qline="${ci}:${li}" placeholder="Extra detail">${esc(l)}</textarea>
+      <button type="button" class="q-x" data-act="qDelLine" data-i="${ci}:${li}" aria-label="Remove detail">×</button></div>`).join('')}
+    <button type="button" class="link-btn small q-adddetail" data-act="qAddLine" data-i="${ci}">+ Add detail${c.lines.length ? '' : ' (for bigger jobs)'}</button>
+  </div>`).join('') || '<p class="muted small">Nothing added yet.</p>';
 }
 function qRefreshCats() {
   const el = document.getElementById('q-cats');
@@ -3216,9 +3216,7 @@ const ACT = {
     if (q.profile === d.p) return;
     q.profile = d.p;
     localStorage.setItem('cb-quote-profile', d.p);
-    // swap the empty starter headings for this business's ones
-    const blank = q.categories.every(c => !c.lines.some(l => String(l).trim()));
-    if (blank && !q.job_id) q.categories = Q_PROFILES[d.p].starter.map(h => ({ heading: h, lines: [''] }));
+
     if (!q.id) q.number = null;
     qKeep(); render();
   },
@@ -3245,7 +3243,7 @@ const ACT = {
   qClearJob() { qDraft().job_id = null; qKeep(); render(); setTimeout(() => document.getElementById('q-jobq')?.focus(), 30); },
   qNew() { S.qd = qBlank(qDraft().profile, qDraft().doc_type); qKeep(); render(); window.scrollTo(0, 0); },
   qAddCat() {
-    qDraft().categories.push({ heading: '', lines: [''] }); qKeep(); qRefreshCats();
+    qDraft().categories.push({ heading: '', lines: [] }); qKeep(); qRefreshCats();
     const hs = document.querySelectorAll('#q-cats .q-heading'); hs[hs.length - 1]?.focus();
   },
   qDelCat(d) { qDraft().categories.splice(+d.i, 1); qKeep(); qRefreshCats(); },
@@ -3265,7 +3263,7 @@ const ACT = {
       const row = {
         profile: q.profile, doc_type: q.doc_type, number, job_id: q.job_id || null, from_quote: q.from_quote || null,
         customer: q.customer, doc_date: q.doc_date || today(),
-        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.lines.length || (c.heading && !Q_STARTERS.has(c.heading.toLowerCase()))), // keep typed headings; drop untouched starter ones
+        categories: q.categories.map(c => ({ heading: String(c.heading || '').trim(), lines: c.lines.map(l => String(l).trim()).filter(Boolean) })).filter(c => c.heading || c.lines.length), // empty boxes aren't printed
         total: r2(num(q.total)), pay_to: q.pay_to || 'primary',
         paid_to_date: q.doc_type === 'invoice' ? r2(num(q.paid_to_date)) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
         business: qBusiness(q.profile, q.pay_to), updated_at: new Date().toISOString(),
@@ -3283,7 +3281,7 @@ const ACT = {
     S.qd = {
       id: rec.id, profile: rec.profile, doc_type: rec.doc_type, number: rec.number, job_id: rec.job_id, from_quote: rec.from_quote,
       customer: { name: '', addr1: '', town: '', postcode: '', ...(rec.customer || {}) }, doc_date: rec.doc_date,
-      categories: (rec.categories || []).map(c => ({ heading: c.heading || '', lines: c.lines?.length ? [...c.lines] : [''] })),
+      categories: (rec.categories || []).map(c => ({ heading: c.heading || '', lines: [...(c.lines || [])] })),
       total: String(rec.total ?? ''), pay_to: rec.pay_to, paid_to_date: num(rec.paid_to_date), paid_note: rec.paid_note || '',
     };
     qKeep(); go('#/quotes');
@@ -3882,6 +3880,7 @@ function qSetField(el) {
     if (path === 'pay_to') el.closest('.seg3')?.querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(el)));
   } else if (el.dataset.qcat != null) {
     d.categories[+el.dataset.qcat].heading = el.value;
+    growChat(el);
   } else if (el.dataset.qline) {
     const [ci, li] = el.dataset.qline.split(':').map(Number);
     d.categories[ci].lines[li] = el.value;

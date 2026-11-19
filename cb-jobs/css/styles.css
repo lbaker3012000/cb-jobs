@@ -982,3 +982,8 @@ html[data-theme="dark"] .q-tag.invoice { background: #6e85c9; }
   .q-bar, .q-meta, .q-after, .q-subnav { display: none !important; }
   .inv-paper { border: 0; box-shadow: none; border-radius: 0; max-width: none; }
 }
+.inv-paper .inv-category.solo { padding-bottom: 10px; }
+.inv-paper .inv-category.solo h4 { margin: 0; font-weight: 600; }
+.inv-paper .inv-category.solo + .inv-category:not(.solo) { padding-top: 12px; }
+.q-cat-head textarea { flex: 1; font-weight: 700; resize: none; min-height: 42px; line-height: 1.35; overflow: hidden; }
+.q-adddetail { margin-top: 2px; }
