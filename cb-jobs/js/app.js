@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119d';
-const VERSION_TAG = '20261119d';
+import { db, DEMO } from './db.js?v=20261119e';
+const VERSION_TAG = '20261119e';
 
-const APP_VERSION = '19 Nov 2026 (4)';
+const APP_VERSION = '19 Nov 2026 (5)';
 
 // ======================================================================
 // State & helpers
@@ -996,7 +996,7 @@ function qPaperHtml(rec) {
       ${paid > 0 && !isQuote
         ? `<div class="inv-sub-row"><span>Total for all materials and labour:</span><span class="num">${qMoney(rec.total)}</span></div>
            <div class="inv-sub-row"><span>Less amount already paid${rec.paid_note ? ` (${esc(rec.paid_note)})` : ''}:</span><span class="num">−${qMoney(paid)}</span></div>
-           <div class="inv-total-row"><span>Balance due:</span><span class="num">${qMoney(num(rec.total) - paid)}</span></div>`
+           <div class="inv-total-row"><span>${num(rec.total) - paid > 0.004 ? 'Balance due:' : 'Paid in full — balance:'}</span><span class="num">${qMoney(Math.max(0, num(rec.total) - paid))}</span></div>`
         : `<div class="inv-total-row"><span>${isQuote ? 'Total Estimated Cost:' : 'Total Cost for all materials and labour:'}</span><span class="num">${qMoney(rec.total)}</span></div>`}
       <hr class="inv-rule">
     </div>
@@ -3243,10 +3243,13 @@ const ACT = {
     const j = jobById(d.id);
     if (!j) return;
     const keep = qDraft();
+    const typed = keep.categories.some(c => String(c.heading).trim() || c.lines.some(l => String(l).trim()));
     S.qd = { ...qFromJob(j, keep.doc_type), id: keep.id, number: keep.id ? keep.number : null, profile: keep.profile };
+    if (typed) { S.qd.categories = keep.categories; S.qd.materials_included = keep.materials_included; }
+    if (keep.total !== '' && keep.total != null && num(keep.total) > 0) S.qd.total = keep.total;
     S.qJobQ = '';
     qKeep(); render();
-    toast('Filled in from the job');
+    toast(typed ? 'Customer filled in from the job — kept your items' : 'Filled in from the job');
   },
   qClearJob() { qDraft().job_id = null; qKeep(); render(); setTimeout(() => document.getElementById('q-jobq')?.focus(), 30); },
   qNew() { S.qd = qBlank(qDraft().profile, qDraft().doc_type); qKeep(); render(); window.scrollTo(0, 0); },
@@ -3263,6 +3266,8 @@ const ACT = {
   async qGenerate(d, el) {
     const q = qDraft();
     if (!String(q.customer.name || '').trim()) { toast('Add the customer name first', true); document.querySelector('[data-qf="customer.name"]')?.focus(); return; }
+    if (!(num(q.total) > 0)) { toast('Add the total first', true); document.querySelector('[data-qf="total"]')?.focus(); return; }
+    if (!q.categories.some(c => String(c.heading).trim() || c.lines.some(l => String(l).trim()))) { toast('Add at least one item of work', true); document.querySelector('[data-qcat="0"]')?.focus(); return; }
     await busy(el, async () => {
       const existing = q.id ? qDocs().find(x => x.id === q.id) : null;
       const number = q.number || (existing ? existing.number : qNextNumber(q.doc_type, q.profile));
@@ -3277,7 +3282,15 @@ const ACT = {
         paid_to_date: q.doc_type === 'invoice' ? r2(num(q.paid_to_date)) : 0, paid_note: q.doc_type === 'invoice' ? (q.paid_note || null) : null,
         business: qBusiness(q.profile, q.pay_to), updated_at: new Date().toISOString(),
       };
-      const saved = await saveRow('docs', q.id || null, row);
+      let saved;
+      try { saved = await saveRow('docs', q.id || null, row); }
+      catch (e) {
+        if (/duplicate key|23505|uniq/i.test(String(e?.message || e?.code || e))) {
+          await loadData().catch(() => {});
+          throw new Error(`Number ${number} was just used on the other phone — tap again for the next number`);
+        }
+        throw e;
+      }
       localStorage.setItem('cb-quote-profile', q.profile);
       S.qd = qBlank(q.profile, q.doc_type); qKeep();
       toast(existing ? 'Saved changes' : `${q.doc_type === 'quote' ? 'Quote' : 'Invoice'} *${number} saved`);

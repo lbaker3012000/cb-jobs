@@ -353,3 +353,6 @@ do $$ begin
 end $$;
 -- "All materials included" printed on its own after the list of works (19 Nov 2026)
 alter table public.docs add column if not exists materials_included boolean not null default false;
+-- No two invoices share a number (both businesses), no two quotes per business (19 Nov 2026)
+create unique index if not exists docs_invoice_number_uniq on public.docs (number) where doc_type = 'invoice';
+create unique index if not exists docs_quote_number_uniq on public.docs (profile, number) where doc_type = 'quote';
