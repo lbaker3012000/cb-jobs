@@ -1062,3 +1062,14 @@ html[data-theme="dark"] .q-mat input { accent-color: var(--gold); }
 
 /* Long ones on several pages: gaps are added so no item, bank details or total is cut by a page edge */
 .inv-gap { display: block; }
+
+/* Printing a quote/invoice: only the page itself, A4, no browser headers, always light */
+#print-root { position: absolute; left: -10000px; top: 0; width: 210mm; padding: 8mm; box-sizing: border-box; background: #fff; }
+#print-root .inv-paper { max-width: none; width: 100%; margin: 0; }
+@media print {
+  @page { size: A4; margin: 0; }
+  body.printing-inv > *:not(#print-root) { display: none !important; }
+  body.printing-inv, html:has(body.printing-inv) { background: #fff !important; }
+  body.printing-inv #print-root { position: static; left: 0; }
+  #print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

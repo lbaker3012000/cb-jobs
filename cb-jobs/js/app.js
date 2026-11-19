@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119g';
-const VERSION_TAG = '20261119g';
+import { db, DEMO } from './db.js?v=20261119h';
+const VERSION_TAG = '20261119h';
 
-const APP_VERSION = '19 Nov 2026 (7)';
+const APP_VERSION = '19 Nov 2026 (8)';
 
 // ======================================================================
 // State & helpers
@@ -2693,10 +2693,7 @@ async function makePdf(filename, selector = '.doc', width = 760) {
     // Quotes & invoices: squeeze onto one A4 page if it can be done neatly; otherwise spill onto more pages
     if (clone.classList.contains('inv-paper')) {
       await Promise.all([...clone.querySelectorAll('img')].map(i => (i.complete ? null : i.decode?.().catch(() => {}))));
-      const pageH = width * (297 - 16) / (210 - 16); // one A4 page (inside 8mm margins) in screen pixels
-      let fit = 0;
-      while (fit < 3 && clone.offsetHeight > pageH - 6) { fit++; clone.classList.remove(`fit${fit - 1}`); clone.classList.add(`fit${fit}`); }
-      if (clone.offsetHeight > pageH - 6) { clone.classList.remove('fit3'); clone.classList.add('fit1', 'multi'); invPaginate(clone, pageH); }
+      invFit(clone, width * (297 - 16) / (210 - 16)); // one A4 page (inside 8mm margins) in screen pixels
     }
     const blob = await window.html2pdf().set({
       margin: [8, 8, 8, 8], image: { type: 'jpeg', quality: 0.95 },
@@ -2707,9 +2704,37 @@ async function makePdf(filename, selector = '.doc', width = 760) {
     return new File([blob], filename, { type: 'application/pdf' });
   } finally { holder.remove(); }
 }
+// Squeeze a quote/invoice onto one page in steps; past that, lay it out over several pages
+function invFit(el, pageH, offset = 0) {
+  const room = pageH - offset * 2 - 6;
+  let fit = 0;
+  while (fit < 3 && el.offsetHeight > room) { fit++; el.classList.remove(`fit${fit - 1}`); el.classList.add(`fit${fit}`); }
+  if (el.offsetHeight > room) { el.classList.remove('fit3'); el.classList.add('fit1', 'multi'); invPaginate(el, pageH, offset); }
+}
+// Print a quote/invoice the same way as the PDF (one page where possible, no browser clutter)
+async function printPaper() {
+  const src = document.querySelector('.inv-paper');
+  if (!src) { window.print(); return; }
+  await document.fonts?.ready;
+  document.getElementById('print-root')?.remove();
+  const root = document.createElement('div');
+  root.id = 'print-root';
+  const clone = src.cloneNode(true);
+  clone.classList.add('pdf');
+  root.appendChild(clone);
+  document.body.appendChild(root);
+  await Promise.all([...clone.querySelectorAll('img')].map(i => (i.complete ? null : i.decode?.().catch(() => {}))));
+  const mm = 96 / 25.4;
+  invFit(clone, 297 * mm, 8 * mm);
+  document.body.classList.add('printing-inv');
+  const done = () => { document.body.classList.remove('printing-inv'); root.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+  setTimeout(() => { if (!matchMedia('print').matches) done(); }, 60000);
+}
 // Long quotes/invoices: push any item that would be cut by a page edge onto the next page
-function invPaginate(el, pageH) {
-  const top0 = () => el.getBoundingClientRect().top;
+function invPaginate(el, pageH, offset = 0) {
+  const top0 = () => el.getBoundingClientRect().top - offset;
   const blocks = [];
   el.querySelectorAll('.inv-body > *, .inv-footer').forEach(n => {
     if (n.matches('hr')) return;
@@ -3712,7 +3737,7 @@ const ACT = {
     f.name.value = name; f.category.value = category; f.frequency.value = frequency;
     f.amount.focus();
   },
-  print() { window.print(); },
+  print() { printPaper(); },
   async signout() {
     try { localStorage.removeItem(snapKey()); } catch { /* ignore */ }
     await db.signOut().catch(console.error); S.session = null; S.data = null; S.loadError = null; render(); },
