@@ -1073,3 +1073,34 @@ html[data-theme="dark"] .q-mat input { accent-color: var(--gold); }
   body.printing-inv #print-root { position: static; left: 0; }
   #print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ===== Contacts ===== */
+.ct-list { padding: 2px 12px; }
+.ct-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); color: inherit; text-decoration: none; }
+.ct-row:first-child { border-top: 0; }
+.ct-av { width: 38px; height: 38px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; background: var(--navy); color: #fff; }
+.ct-av.k-supplier { background: var(--gold); color: var(--navy); }
+.ct-av.k-trade { background: #4f7a63; }
+.ct-av.k-other { background: #8a8f98; }
+.ct-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ct-main > b, .ct-main > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-jobs { flex: none; font-size: .72rem; font-weight: 600; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.ct-wrap { text-align: right; word-break: break-word; }
+.ct-notes { margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--bg); font-size: .92rem; }
+.seg4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 12px; }
+.seg4 label { margin: 0; text-align: center; padding: 9px 2px; border: 1px solid var(--line); border-radius: 10px; font-size: .8rem; font-weight: 500; background: var(--card); cursor: pointer; }
+.seg4 label input { position: absolute; opacity: 0; pointer-events: none; }
+.seg4 label.on { background: var(--navy); border-color: var(--navy); color: #fff; font-weight: 700; }
+html[data-theme="dark"] .seg4 label.on { background: var(--gold); border-color: var(--gold); color: #0c1a24; }
+html[data-theme="dark"] .ct-av { background: #2c4a63; }
+html[data-theme="dark"] .ct-av.k-supplier { background: var(--gold); color: #0c1a24; }
+/* 8 tabs: keep labels apart on narrow phones */
+.tabs a span { white-space: nowrap; }
+@media (max-width: 400px) {
+  .tabs a { padding-left: 0; padding-right: 0; min-width: 0; }
+  .tabs a span { font-size: 9.5px; letter-spacing: -.02em; }
+  .tabs a svg { width: 21px; height: 21px; }
+}
+@media (max-width: 370px) {
+  .tabs a span { font-size: 8.6px; letter-spacing: -.03em; }
+}

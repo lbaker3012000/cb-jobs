@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261119h';
-const VERSION_TAG = '20261119h';
+import { db, DEMO } from './db.js?v=20261121a';
+const VERSION_TAG = '20261121a';
 
-const APP_VERSION = '19 Nov 2026 (8)';
+const APP_VERSION = '21 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -102,6 +102,7 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>',
   send: '<svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>',
+  people: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4M18.5 14.8c1.8.8 2.8 2.6 3 5.2"/></svg>',
   inbox: '<svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z"/></svg>',
   upload: '<svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>',
   spark: '<svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>',
@@ -354,7 +355,7 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView,
+    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView, contacts: contactsView,
   };
   const typing = r.view === 'chat' && document.activeElement?.id === 'chat-input';
   const nearBottom = r.view !== 'chat' || (window.innerHeight + window.scrollY >= document.body.scrollHeight - 160);
@@ -399,6 +400,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
     ${tab('jobs', 'Jobs', ICON.jobs)}
     ${tab('calendar', 'Calendar', ICON.cal)}
     ${tab('quotes', 'Quotes', ICON.doc)}
+    ${tab('contacts', 'Contacts', ICON.people)}
     ${tab('notes', 'Notes', ICON.note)}
     ${tab('archive', 'Archive', ICON.archive)}
     ${tab('money', 'Money', ICON.money)}
@@ -1219,6 +1221,132 @@ function qSettingsView() {
     <button class="btn primary wide big">Save details</button>
   </form>`;
   return layout({ title: 'Quote details', body });
+}
+
+// ======================================================================
+// Contacts: every customer from the jobs, plus suppliers, trades and others you add
+// ======================================================================
+const CONTACT_KINDS = { customer: 'Customer', supplier: 'Supplier', trade: 'Trade', other: 'Other' };
+const normPhone = p => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('44')) d = '0' + d.slice(2); return d.length >= 9 ? d.slice(-10) : ''; };
+const normEmail = e => String(e || '').trim().toLowerCase();
+const waNumber = p => { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('0')) d = '44' + d.slice(1); return d; };
+
+// Build the contact list: saved contacts + customers worked out from the jobs (merged when the phone or email match)
+function contactList() {
+  const saved = (S.data?.contacts || []).map(c => ({ ...c, key: c.id, saved: true, jobs: [] }));
+  const byPhone = new Map(); const byEmail = new Map();
+  const byName = new Map();
+  const nameKey = c => String(c.name || '').trim().toLowerCase();
+  const index = c => { const p = normPhone(c.phone); const e = normEmail(c.email); if (p) byPhone.set(p, c); if (e) byEmail.set(e, c); if (c.saved && nameKey(c)) byName.set(nameKey(c), c); };
+  saved.forEach(index);
+  const fromJobs = new Map();
+  const jobs = (S.data?.jobs || []).slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  for (const j of jobs) {
+    if (!j.customer_name && !j.customer_phone && !j.customer_email) continue;
+    const p = normPhone(j.customer_phone); const e = normEmail(j.customer_email);
+    let c = (p && byPhone.get(p)) || (e && byEmail.get(e));
+    if (!c) { // same name as a saved contact, and no clash in postcode
+      const n = byName.get(String(j.customer_name || '').trim().toLowerCase());
+      if (n && (!n.postcode || !j.postcode || n.postcode.replace(/\s/g, '').toLowerCase() === String(j.postcode).replace(/\s/g, '').toLowerCase())) c = n;
+    }
+    if (!c) {
+      const key = p ? `p${p}` : e ? `e${e}` : `n${String(j.customer_name).trim().toLowerCase()}|${String(j.postcode || '').replace(/\s/g, '').toLowerCase()}`;
+      c = fromJobs.get(key);
+      if (!c) {
+        c = { key, saved: false, kind: 'customer', name: j.customer_name || 'No name', phone: j.customer_phone || '', email: j.customer_email || '', address: j.address || '', postcode: j.postcode || '', notes: '', jobs: [] };
+        fromJobs.set(key, c); index(c);
+      }
+    }
+    c.jobs.push(j);
+    // fill gaps from older jobs
+    if (!c.phone && j.customer_phone) c.phone = j.customer_phone;
+    if (!c.email && j.customer_email) c.email = j.customer_email;
+    if (!c.address && j.address) { c.address = j.address; c.postcode = j.postcode || c.postcode; }
+  }
+  return [...saved, ...fromJobs.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'en', { sensitivity: 'base' }));
+}
+function contactMatches(c, q) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [c.name, c.company, c.phone, normPhone(c.phone), c.email, c.address, c.postcode, String(c.postcode || '').replace(/\s/g, ''), c.notes, CONTACT_KINDS[c.kind],
+    ...c.jobs.map(j => `${j.title || ''} ${j.address || ''} #${j.ref ?? ''}`)].join(' ').toLowerCase();
+  return words.every(w => hay.includes(w));
+}
+function contactRowsHtml() {
+  const f = S.contactsF || 'all';
+  const list = contactList().filter(c => f === 'all' || c.kind === f).filter(c => contactMatches(c, S.contactsQ));
+  if (!list.length) return `<p class="muted small center">${S.contactsQ ? 'No one matches that.' : 'No contacts yet.'}</p>`;
+  return list.map(c => `<a class="ct-row" href="#/contacts/${encodeURIComponent(c.key)}">
+    <span class="ct-av k-${c.kind}">${esc((String(c.name || '?').trim()[0] || '?').toUpperCase())}</span>
+    <span class="ct-main"><b>${esc(c.name)}</b>${c.company ? ` <span class="muted small">${esc(c.company)}</span>` : ''}
+      <span class="muted small">${[c.kind !== 'customer' ? CONTACT_KINDS[c.kind] : '', c.phone, c.postcode || String(c.address || '').split('\n')[0]].filter(Boolean).map(esc).join(' · ')}</span></span>
+    ${c.jobs.length ? `<span class="ct-jobs">${c.jobs.length} job${c.jobs.length > 1 ? 's' : ''}</span>` : ''}
+  </a>`).join('');
+}
+function contactsView({ id }) {
+  if (id) return contactView(decodeURIComponent(id));
+  const all = contactList();
+  const f = S.contactsF || 'all';
+  const count = k => all.filter(c => c.kind === k).length;
+  const chip = (k, l) => `<button type="button" class="chip ${f === k ? 'on' : ''}" data-act="contactsFilter" data-f="${k}">${l}</button>`;
+  const body = `
+  <input type="search" class="q-search" id="ct-q" placeholder="Search name, number, address, postcode…" autocomplete="off" value="${esc(S.contactsQ || '')}" data-input="contactsQ">
+  <div class="chips">${chip('all', `All (${all.length})`)}${chip('customer', `Customers (${count('customer')})`)}${chip('supplier', `Suppliers (${count('supplier')})`)}${chip('trade', `Trades (${count('trade')})`)}${chip('other', 'Other')}</div>
+  <section class="card ct-list" id="ct-list">${contactRowsHtml()}</section>
+  <p class="muted small center">Customers from your jobs appear here automatically.</p>`;
+  return layout({
+    title: 'Contacts', body,
+    fab: S.data.contactsMissing ? '' : `<button class="fab" data-act="contactSheet" aria-label="Add contact">${ICON.plus}</button>`,
+  });
+}
+function contactView(key) {
+  const c = contactList().find(x => x.key === key);
+  if (!c) return layout({ title: 'Contacts', back: true, body: '<div class="empty">Contact not found.</div>' });
+  const phone = String(c.phone || '').replace(/[^\d+]/g, '');
+  const addr = [String(c.address || '').split('\n').join(', '), c.postcode].filter(Boolean).join(', ');
+  const jobs = c.jobs.slice().sort((a, b) => String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)));
+  const body = `
+  <section class="hero">
+    <div class="row"><h2>${esc(c.name)}</h2><span class="pill">${CONTACT_KINDS[c.kind] || 'Contact'}</span></div>
+    ${c.company ? `<div class="hero-who">${esc(c.company)}</div>` : ''}
+    <div class="quick">
+      ${phone ? `<a href="tel:${esc(phone)}">${ICON.phone}<span>Call</span></a>` : `<span class="off">${ICON.phone}<span>Call</span></span>`}
+      ${phone ? `<a href="sms:${esc(phone)}">${ICON.chat}<span>Text</span></a>` : `<span class="off">${ICON.chat}<span>Text</span></span>`}
+      ${c.email ? `<a href="mailto:${esc(c.email)}">${ICON.send}<span>Email</span></a>` : `<span class="off">${ICON.send}<span>Email</span></span>`}
+      ${addr ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener">${ICON.pin}<span>Directions</span></a>` : `<span class="off">${ICON.pin}<span>Directions</span></span>`}
+    </div>
+  </section>
+  <section class="card">
+    ${c.phone ? `<div class="kv"><span>Phone</span><b>${esc(c.phone)}</b></div>` : ''}
+    ${phone ? `<div class="kv"><span>WhatsApp</span><a href="https://wa.me/${waNumber(phone)}" target="_blank" rel="noopener">Open chat</a></div>` : ''}
+    ${c.email ? `<div class="kv"><span>Email</span><b class="ct-wrap">${esc(c.email)}</b></div>` : ''}
+    ${addr ? `<div class="kv"><span>Address</span><b class="ct-wrap">${nl2br([c.address, c.postcode].filter(Boolean).join('\n'))}</b></div>` : ''}
+    ${c.notes ? `<div class="ct-notes">${nl2br(c.notes)}</div>` : ''}
+    ${!c.phone && !c.email && !addr && !c.notes ? '<p class="muted small">No details yet.</p>' : ''}
+  </section>
+  ${jobs.length ? `<section class="card"><h3>Jobs</h3>${jobs.map(j => `<a class="kv link" href="#/job/${j.id}"><span>${esc(j.title || jobName(j))} <em class="muted">#${j.ref ?? ''}${j.start_date ? ` · ${fmtShort(j.start_date)}` : ''}</em></span><b>${pill(j.status)}</b></a>`).join('')}</section>` : ''}
+  <div class="q-after">
+    <button class="btn primary wide" data-act="contactQuote" data-key="${esc(c.key)}">${ICON.doc} New quote for ${esc(String(c.name).split(' ')[0])}</button>
+    <button class="btn wide" data-act="contactSheet" data-key="${esc(c.key)}">${c.saved ? 'Edit contact' : 'Add notes / edit details'}</button>
+    ${c.saved ? `<button class="link-btn small danger-text" data-act="contactDelete" data-id="${c.id}">Delete contact</button>` : ''}
+  </div>`;
+  return layout({ title: 'Contact', back: true, body });
+}
+function contactSheetHtml(c) {
+  const k = c?.kind || 'supplier';
+  return `<form data-form="contact" class="form">
+    ${sheetHead(c?.saved ? 'Edit contact' : c ? 'Save contact' : 'Add contact')}
+    <input type="hidden" name="id" value="${esc(c?.saved ? c.id : '')}">
+    <div class="seg4">${Object.entries(CONTACT_KINDS).map(([v, l]) => `<label class="${k === v ? 'on' : ''}"><input type="radio" name="kind" value="${v}" ${k === v ? 'checked' : ''}>${l}</label>`).join('')}</div>
+    <label>Name<input name="name" required value="${esc(c?.name || '')}" autocomplete="off"></label>
+    <label>Company <span class="muted small">(optional)</span><input name="company" value="${esc(c?.company || '')}" autocomplete="off" placeholder="e.g. Plumb Center Hastings"></label>
+    <label>Phone<input name="phone" type="tel" value="${esc(c?.phone || '')}"></label>
+    <label>Email<input name="email" type="email" value="${esc(c?.email || '')}" autocomplete="off"></label>
+    <label>Address<textarea name="address" rows="2">${esc(c?.address || '')}</textarea></label>
+    <label>Postcode<input name="postcode" value="${esc(c?.postcode || '')}"></label>
+    <label>Notes<textarea name="notes" rows="3" placeholder="e.g. trade account number, opening hours, gate code">${esc(c?.notes || '')}</textarea></label>
+    <button class="btn primary wide big">Save</button>
+  </form>`;
 }
 
 // Dark mode: remembered on each phone
@@ -2927,6 +3055,17 @@ function getPayer() { try { const v = localStorage.getItem('cb-payer'); return v
 function setPayer(p) { if (p !== 'a' && p !== 'b') return; S.payer = p; try { localStorage.setItem('cb-payer', p); } catch { /* ignore */ } }
 
 const FORMS = {
+  async contact(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      const id = fd.get('id') || null;
+      const val = k => String(fd.get(k) || '').trim() || null;
+      const row = { kind: fd.get('kind') || 'other', name: val('name'), company: val('company'), phone: val('phone'), email: val('email'), address: val('address'), postcode: val('postcode') ? val('postcode').toUpperCase() : null, notes: val('notes'), updated_at: new Date().toISOString() };
+      if (!row.name) throw new Error('Add a name');
+      const saved = await saveRow('contacts', id, row);
+      closeSheet(); toast('Contact saved');
+      go(`#/contacts/${encodeURIComponent(saved.id)}`);
+    });
+  },
   async qSettings(fd, form) {
     await busy(form.querySelector('button.primary'), async () => {
       const pk = fd.get('_profile');
@@ -3286,6 +3425,33 @@ const FORMS = {
 };
 
 const ACT = {
+  contactsFilter(d) { S.contactsF = d.f; render(); },
+  contactSheet(d) {
+    const c = d.key ? contactList().find(x => x.key === d.key) : null;
+    openSheet(contactSheetHtml(c));
+    sheet.querySelectorAll('.seg4 input').forEach(i => i.addEventListener('change', () => sheet.querySelectorAll('.seg4 label').forEach(l => l.classList.toggle('on', l.contains(i) && i.checked))));
+    if (!c) setTimeout(() => sheet.querySelector('input[name=name]')?.focus(), 60);
+  },
+  contactQuote(d) {
+    const c = contactList().find(x => x.key === d.key);
+    if (!c) return;
+    const lines = String(c.address || '').split('\n').map(x => x.trim()).filter(Boolean);
+    const q = qBlank(qDraft().profile, 'quote');
+    q.customer = { name: c.name || '', addr1: lines[0] || '', town: lines.slice(1).join(', '), postcode: c.postcode || '' };
+    S.qd = q; qKeep(); go('#/quotes');
+    toast(`New quote for ${c.name}`);
+  },
+  contactDelete(d) {
+    const c = (S.data.contacts || []).find(x => x.id === d.id);
+    if (!c) return;
+    openSheet(`<div class="form">${sheetHead(`Delete ${esc(c.name)}?`)}
+      <p>Removes this contact from the book. Their jobs (if any) aren't touched${c.kind === 'customer' ? ', and they will still show as a customer from those jobs' : ''}.</p>
+      <button class="btn danger wide big" data-act="contactDeleteGo" data-id="${c.id}">Delete</button></div>`);
+  },
+  async contactDeleteGo(d) {
+    try { await deleteRow('contacts', d.id); closeSheet(); toast('Deleted'); go('#/contacts'); }
+    catch (e) { toast(friendly(e), true); }
+  },
   qProfile(d) {
     const q = qDraft();
     if (q.profile === d.p) return;
@@ -4020,6 +4186,7 @@ document.addEventListener('input', e => {
   if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJobQ') { S.chatJobQ = e.target.value; const el = document.getElementById('chat-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5); }
+  if (k === 'contactsQ') { S.contactsQ = e.target.value; const el = document.getElementById('ct-list'); if (el) el.innerHTML = contactRowsHtml(); }
   if (k === 'qJobQ') { S.qJobQ = e.target.value; const el = document.getElementById('q-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.qJobQ, 'qPickJob'); }
   if (k === 'qSavedQ') { S.qSavedQ = e.target.value; const el = document.getElementById('q-saved-list'); if (el) el.innerHTML = qSavedRows(qSavedList()); }
   if (k === 'inboxText') S.inboxText = e.target.value;

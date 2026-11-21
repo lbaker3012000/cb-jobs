@@ -358,3 +358,27 @@ create unique index if not exists docs_invoice_number_uniq on public.docs (numbe
 create unique index if not exists docs_quote_number_uniq on public.docs (profile, number) where doc_type = 'quote';
 -- Invoice marked "Paid in full" (receipt-style invoice) (19 Nov 2026)
 alter table public.docs add column if not exists paid_in_full boolean not null default false;
+
+-- Contact book: suppliers, trades, past customers etc. (job customers are listed automatically) (21 Nov 2026)
+create table if not exists public.contacts (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null default 'customer' check (kind in ('customer','supplier','trade','other')),
+  name text not null,
+  company text,
+  phone text,
+  email text,
+  address text,
+  postcode text,
+  notes text,
+  created_by text default lower(auth.jwt() ->> 'email'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.contacts enable row level security;
+drop policy if exists "members only" on public.contacts;
+create policy "members only" on public.contacts for all to authenticated using (public.is_member()) with check (public.is_member());
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'contacts') then
+    alter publication supabase_realtime add table public.contacts;
+  end if;
+end $$;
