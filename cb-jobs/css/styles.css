@@ -1223,3 +1223,54 @@ html[data-theme="dark"] .ph summary { color: var(--gold); }
 .tip-ico { font-size: 1.2rem; }
 .tip > div { flex: 1; }
 .tip .btn { flex: none; }
+
+/* ===== Text colour schemes (Settings → Text colours). Header banner is left alone. ===== */
+html[data-text="hc"]   { --ink: #000; --muted: #33393f; --acc: #0d2131; }
+html[data-text="blue"] { --ink: #0a1620; --muted: #3c4853; --acc: #0b5cad; }
+html[data-text="warm"] { --ink: #1f150a; --muted: #4d4234; --acc: #8a5410; }
+html[data-theme="dark"][data-text="hc"]   { --ink: #fff; --muted: #dfe5ea; --acc: #fff; }
+html[data-theme="dark"][data-text="blue"] { --ink: #fff; --muted: #d3dde6; --acc: #8fd0ff; }
+html[data-theme="dark"][data-text="warm"] { --ink: #fff4e0; --muted: #e6d9c3; --acc: #ffd27a; }
+html[data-text="hc"] body { font-weight: 500; }
+html[data-text="hc"] h4, html[data-text="hc"] .muted { font-weight: 500; }
+/* plain links */
+html.tx a:where(:not(.top a)) { color: var(--ink); }
+html.tx a.muted, html.tx a:not([class]), html.tx .link-btn, html.tx .hero-profile, html.tx .ct-go,
+html.tx .group, html.tx .hint, html.tx .big3 .change, html.tx .act-who, html.tx .ph summary,
+html.tx .chat-attach.on, html.tx .cover .row b, html.tx .mdow, html.tx .tabs a.on { color: var(--acc); }
+html.tx a.muted, html.tx a:not([class]), html.tx .link-btn { text-decoration: underline; text-underline-offset: 3px; }
+html.tx .tabs a { color: var(--muted); }
+html.tx .home-actions a:not(:first-child) { color: var(--ink); }
+html.tx .group { font-weight: 700; }
+/* keep buttons readable on their own backgrounds */
+html.tx a.btn.primary, html[data-theme="dark"].tx a.btn.primary { color: var(--navy); }
+html.tx:not([data-theme="dark"]) a.btn.primary { color: #fff; }
+html.tx .home-actions a:first-child { color: #fff; }
+html[data-theme="dark"].tx .home-actions a:first-child { color: #0c1a24; }
+
+/* Bigger text — the header stays its normal size */
+html[data-size="big"] { font-size: 112.5%; }
+html[data-size="big"] body { font-size: 17px; }
+html[data-size="big"] .top h1 { font-size: 16.32px; }
+html[data-size="big"] .top .wordmark { font-size: 20px; }
+html[data-size="big"] .tabs a { font-size: .68rem; }
+
+/* Picker in Settings — each option shows its own colours on the current background */
+.look-opts { display: grid; gap: 8px; margin: 10px 0 4px; }
+.look-opt { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; padding: 12px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--card); font: inherit; cursor: pointer; }
+.look-opt b { font-size: 1rem; }
+.look-opt span { grid-column: 1; font-size: .82rem; }
+.look-opt em { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-style: normal; font-size: .85rem; }
+.look-opt.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+.look-opt.on b::after { content: ' ✓'; color: var(--gold-deep); }
+.look-h { margin-top: 16px; }
+.sc-classic b { color: #0d2131; } .sc-classic span { color: #6b7178; } .sc-classic em { color: #a8742e; }
+.sc-hc b { color: #000; } .sc-hc span { color: #33393f; font-weight: 500; } .sc-hc em { color: #0d2131; text-decoration: underline; }
+.sc-blue b { color: #0a1620; } .sc-blue span { color: #3c4853; } .sc-blue em { color: #0b5cad; text-decoration: underline; }
+.sc-warm b { color: #1f150a; } .sc-warm span { color: #4d4234; } .sc-warm em { color: #8a5410; text-decoration: underline; }
+html[data-theme="dark"] .sc-classic b { color: #ece6da; } html[data-theme="dark"] .sc-classic span { color: #97a2ac; } html[data-theme="dark"] .sc-classic em { color: #d9a55b; }
+html[data-theme="dark"] .sc-hc b, html[data-theme="dark"] .sc-hc em { color: #fff; } html[data-theme="dark"] .sc-hc span { color: #dfe5ea; }
+html[data-theme="dark"] .sc-blue b { color: #fff; } html[data-theme="dark"] .sc-blue span { color: #d3dde6; } html[data-theme="dark"] .sc-blue em { color: #8fd0ff; }
+html[data-theme="dark"] .sc-warm b { color: #fff4e0; } html[data-theme="dark"] .sc-warm span { color: #e6d9c3; } html[data-theme="dark"] .sc-warm em { color: #ffd27a; }
+html[data-theme="dark"] .look-opt.on b::after { color: var(--gold); }
+html.tx .home-actions a { text-decoration: none; }

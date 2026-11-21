@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121g';
-const VERSION_TAG = '20261121g';
+import { db, DEMO } from './db.js?v=20261121h';
+const VERSION_TAG = '20261121h';
 
-const APP_VERSION = '21 Nov 2026 (7)';
+const APP_VERSION = '21 Nov 2026 (8)';
 
 // ======================================================================
 // State & helpers
@@ -1658,7 +1658,6 @@ function jobsView() {
   const dd = dayData(t, dlToday);
   const tmr = dayData(addDays(t, 1), deadlinesIn(addDays(t, 1), addDays(t, 1)));
   const nTmr = tmr.jobs.length + tmr.events.length;
-  const other = S.meKnown ? nameOf(otherOf(S.me)) : 'partner';
   const searching = String(S.search || '').trim().length > 0;
   const body = `
   <div class="home-hello"><h2>${hello}${name ? `, ${esc(name)}` : ''}</h2>
@@ -1673,8 +1672,6 @@ function jobsView() {
   <div class="home-actions">
     <a href="#/edit/new">${ICON.plus}<span>New job<br>or quote</span></a>
     <a href="#/inbox">${ICON.upload}<span>Add a receipt<br>or invoice</span></a>
-    <a href="#/chat">${ICON.chat}<span>Message<br>${esc(other)}</span></a>
-    <a href="#/contacts">${ICON.people}<span>Find a<br>customer</span></a>
     ${S.data.inboxMissing ? '' : `<button type="button" class="home-talk" data-act="talkSheet">${ICON.mic}<span><b>Tell Claude</b><em>Say what happened — "Joshua paid £200 by bank"</em></span></button>`}
   </div>
 
@@ -2860,10 +2857,37 @@ function notifCardHtml() {
     </div>`;
 }
 
+// Text colours + size — per phone, so Henry and Luke can each pick their own
+const TEXT_SCHEMES = [
+  ['classic', 'Gold and grey', 'How it looked to start with'],
+  ['hc', 'Black and white', 'Clearest — plain, strong text'],
+  ['blue', 'White and blue', 'Links and headings in blue'],
+  ['warm', 'Cream and yellow', 'Softer, warmer, still bright'],
+];
+const lookGet = () => { try { return { text: localStorage.getItem('cb-text') || 'classic', size: localStorage.getItem('cb-size') || 'normal' }; } catch { return { text: 'classic', size: 'normal' }; } };
+function lookApply() {
+  const { text, size } = lookGet(), h = document.documentElement;
+  h.dataset.text = text; h.dataset.size = size;
+  h.classList.toggle('tx', text !== 'classic');
+}
+function lookCardHtml() {
+  const { text, size } = lookGet();
+  return `<h3>Text colours</h3>
+    <p class="muted small">Pick whichever is easiest to read. It only changes this phone.</p>
+    <div class="look-opts">${TEXT_SCHEMES.map(([k, name, sub]) => `<button type="button" class="look-opt sc-${k}${k === text ? ' on' : ''}" data-act="setText" data-k="${k}" aria-pressed="${k === text}">
+      <b>${name}</b><span>${sub}</span><em>Example link ›</em></button>`).join('')}</div>
+    <h3 class="look-h">Text size</h3>
+    <div class="btn-row">
+      <button type="button" class="chip${size === 'normal' ? ' on' : ''}" data-act="setSize" data-k="normal">Normal</button>
+      <button type="button" class="chip${size === 'big' ? ' on' : ''}" data-act="setSize" data-k="big">Bigger</button>
+    </div>`;
+}
+
 function settingsView() {
   const s = set();
   const v = k => esc(s[k] ?? '');
   const body = `
+  <section class="card" id="look-card">${lookCardHtml()}</section>
   <a class="card home-archive" href="#/quotes/settings">${ICON.doc}<span>Business &amp; bank details for quotes and invoices</span><span class="chev">›</span></a>
   <section class="card" id="notif-card">${notifCardHtml()}</section>
   <form data-form="settings" class="form">
@@ -3815,6 +3839,8 @@ const ACT = {
     document.getElementById('trip-jobpick').innerHTML = `<div class="job-chosen">${ICON.jobs}<span><b>${esc(jobName(j))}</b></span><button type="button" data-act="tripClearJob" aria-label="Clear">×</button></div>`;
   },
   tipDone(d) { const t = tipsSeen(); t[d.v] = 1; try { localStorage.setItem('cb-tips', JSON.stringify(t)); } catch { /* ignore */ } document.getElementById('tip')?.remove(); },
+  setText(d) { try { localStorage.setItem('cb-text', d.k); } catch { /* ignore */ } lookApply(); const c = document.getElementById('look-card'); if (c) c.innerHTML = lookCardHtml(); },
+  setSize(d) { try { localStorage.setItem('cb-size', d.k); } catch { /* ignore */ } lookApply(); const c = document.getElementById('look-card'); if (c) c.innerHTML = lookCardHtml(); },
   tipsReset() { try { localStorage.removeItem('cb-tips'); } catch { /* ignore */ } toast('Tips will show again'); },
   async phUse() {
     const total = phCalc();
