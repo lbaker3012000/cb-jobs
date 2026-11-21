@@ -402,3 +402,19 @@ drop policy if exists "members read" on public.activity;
 create policy "members read" on public.activity for select to authenticated using (public.is_member());
 -- log_activity() trigger function: see migration batch1_enquiry_source_guarantee_service_activity
 -- (records insert/update/delete on jobs, costs, payments, overheads, events, tasks, docs, contacts, notes, photos)
+
+-- Mileage log (HMRC mileage allowance) (21 Nov 2026)
+create table if not exists public.mileage (
+  id uuid primary key default gen_random_uuid(),
+  trip_date date not null default current_date,
+  who text not null default 'a' check (who in ('a','b')),
+  miles numeric(8,1) not null check (miles > 0),
+  job_id uuid references public.jobs(id) on delete set null,
+  purpose text,
+  created_by text default lower(auth.jwt() ->> 'email'),
+  created_at timestamptz not null default now()
+);
+create index if not exists mileage_date_idx on public.mileage (trip_date);
+alter table public.mileage enable row level security;
+drop policy if exists "members only" on public.mileage;
+create policy "members only" on public.mileage for all to authenticated using (public.is_member()) with check (public.is_member());

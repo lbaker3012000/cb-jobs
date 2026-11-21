@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121e';
-const VERSION_TAG = '20261121e';
+import { db, DEMO } from './db.js?v=20261121f';
+const VERSION_TAG = '20261121f';
 
-const APP_VERSION = '21 Nov 2026 (5)';
+const APP_VERSION = '21 Nov 2026 (6)';
 
 // ======================================================================
 // State & helpers
@@ -88,6 +88,7 @@ const DEFAULTS = {
   area: 'Covering East Sussex & Kent',
   website: 'cunninghamandbaker.co.uk',
   vat_registered: false, vat_number: '', vat_rate: 20,
+  markup_pct: 20, day_rate: 0,
   quote_valid_days: 30,
   quote_terms: 'This is a fixed price for the work described above. Any additional work requested will be agreed and quoted separately before it is carried out. Materials remain our property until paid for in full.',
   invoice_terms: 'Payment due within 14 days of the invoice date. Thank you for your business.',
@@ -106,6 +107,8 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>',
   send: '<svg viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/></svg>',
+  car: '<svg viewBox="0 0 24 24"><path d="M3 13l2-5.5A2 2 0 0 1 6.9 6h10.2a2 2 0 0 1 1.9 1.5L21 13v5h-2.5M3 13v5h2.5M3 13h18"/><circle cx="7.5" cy="17.5" r="2"/><circle cx="16.5" cy="17.5" r="2"/><path d="M9.5 17.5h5"/></svg>',
   people: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4M18.5 14.8c1.8.8 2.8 2.6 3 5.2"/></svg>',
   inbox: '<svg viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z"/></svg>',
   upload: '<svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>',
@@ -433,7 +436,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   </header>
   ${S.offlineSince ? `<div class="offline-banner"><b>No signal</b> — showing jobs as of ${new Date(S.offlineSince).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}. You can look, but changes can't be saved until you're back online.</div>` : ''}
   ${DEMO ? '<div class="demo-banner"><b>Demo</b> — sample jobs to try out. Changes stay on this phone only.</div>' : ''}
-  <main>${body}</main>
+  <main>${tipHtml(r)}${body}</main>
   ${fab}
   ${nav ? `<nav class="tabs">
     ${tab('jobs', 'Home', ICON.jobs)}
@@ -572,7 +575,7 @@ const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
 const TESS_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 const TESS_LANG = 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int';
 const INBOX_STATUS = { reading: 'Reading the file…', new: 'Waiting for Claude', proposed: 'Ready to approve', question: 'Claude has a question', approved: 'Done', rejected: 'Rejected' };
-const ACTION_TYPES = { new_job: 'New job', update_job: 'Change job', add_cost: 'Cost', add_payment: 'Payment', add_overhead: 'Business buy', add_task: 'To-do', add_note: 'Note' };
+const ACTION_TYPES = { new_job: 'New job', update_job: 'Change job', add_cost: 'Cost', add_payment: 'Payment', add_overhead: 'Business buy', add_task: 'To-do', add_note: 'Note', add_trip: 'Mileage' };
 const myEmail = () => String(S.session?.user?.email || '').toLowerCase();
 const byName = email => {
   const m = (S.data?.members || []).find(x => String(x.email).toLowerCase() === String(email || '').toLowerCase());
@@ -721,6 +724,10 @@ function actionDetail(a) {
     if (num(n.price)) bits.push(money(n.price));
   } else if (a.type === 'update_job') {
     bits.push(Object.entries(a.patch || {}).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${k === 'price' ? money(v) : /_date$/.test(k) && v ? fmtShort(v) : v}`).join(', '));
+  } else if (a.type === 'add_trip') {
+    bits.push(`${num(a.miles)} miles`, nameOf(a.who || 'a'));
+    if (a.trip_date) bits.push(fmtShort(a.trip_date));
+    if (a.purpose) bits.push(a.purpose);
   } else if (a.type === 'add_task') {
     if (a.due_date) bits.push(`due ${fmtShort(a.due_date)}`);
     if (a.steps?.length) bits.push(`${a.steps.length} steps`);
@@ -856,7 +863,7 @@ function inboxBannerHtml() {
 
 // Turning an approved proposal into real records
 const ALLOW = {
-  jobs: ['title', 'status', 'customer_name', 'customer_phone', 'customer_email', 'address', 'postcode', 'description', 'notes', 'price', 'vat_applies', 'vat_rate', 'who', 'quote_date', 'start_date', 'end_date', 'finished_date'],
+  jobs: ['title', 'status', 'customer_name', 'customer_phone', 'customer_email', 'address', 'postcode', 'description', 'notes', 'price', 'vat_applies', 'vat_rate', 'who', 'quote_date', 'start_date', 'end_date', 'finished_date', 'source', 'guarantee_until', 'guarantee_note', 'service_due'],
   costs: ['description', 'category', 'qty', 'unit_cost', 'supplier', 'paid_by', 'cost_date'],
   payments: ['pay_date', 'amount', 'kind', 'method', 'received_by', 'note'],
   overheads: ['name', 'category', 'amount', 'frequency', 'paid_by', 'start_date', 'end_date', 'notes'],
@@ -882,6 +889,11 @@ async function applyAction(a, keyMap) {
       text: a.text || a.label, due_date: a.due_date || null, done: false, created_by: myEmail(),
       steps: a.steps?.length ? a.steps.map(t => ({ id: crypto.randomUUID(), text: String(t), done: false, done_at: null })) : null,
     })).id;
+    case 'add_trip': {
+      if (!(num(a.miles) > 0)) throw new Error(`No miles for "${a.label || 'trip'}"`);
+      const tj = a.job_id ? (keyMap[a.job_id] || a.job_id) : null;
+      return (await saveRow('mileage', null, { trip_date: a.trip_date || today(), who: a.who === 'b' ? 'b' : 'a', miles: r2(num(a.miles)), job_id: tj && jobById(tj) ? tj : null, purpose: a.purpose || null })).id;
+    }
     case 'add_note': return (await saveRow('notes', null, { text: a.text || a.label || '', pinned: false, created_by: myEmail(), updated_by: myEmail(), updated_at: now })).id;
     default: throw new Error(`Unknown change type: ${a.type}`);
   }
@@ -1267,6 +1279,99 @@ function qSettingsView() {
 }
 
 
+
+// ======================================================================
+// Tell Claude: speak (or type) what happened; it goes to the Claude inbox
+// ======================================================================
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let talkRec = null;
+function talkStop() { try { talkRec?.stop(); } catch { /* ignore */ } talkRec = null; document.getElementById('talk-btn')?.classList.remove('on'); }
+function talkSheet() {
+  openSheet(`<form data-form="talk" class="form talk">
+    ${sheetHead('Tell Claude')}
+    <p class="muted">Say it like you'd text Luke — Claude sorts it into the right place and asks you to approve it.</p>
+    <ul class="talk-eg muted small"><li>"Joshua paid two hundred quid by bank today"</li><li>"Fifteen pound at Screwfix for Pevensey, I paid"</li><li>"New enquiry, Mrs Smith, 4 High Street Bexhill, leaking tap"</li></ul>
+    ${SpeechRec ? `<button type="button" class="talk-btn" id="talk-btn" data-act="talkMic">${ICON.mic}<span>Tap and speak</span></button>` : ''}
+    <textarea name="text" rows="4" required placeholder="${SpeechRec ? 'What you say appears here — you can fix it before sending' : 'Tap the microphone on your keyboard and speak, or type'}"></textarea>
+    <button class="btn primary wide big">${ICON.send} Send to Claude</button>
+    <p class="muted small center">Claude checks at 8am and 5pm. Nothing changes until you press Approve.</p>
+  </form>`);
+  if (!SpeechRec) setTimeout(() => sheet.querySelector('textarea')?.focus(), 80);
+}
+function talkMic() {
+  if (talkRec) { talkStop(); return; }
+  const ta = sheet.querySelector('form[data-form=talk] textarea');
+  const btn = document.getElementById('talk-btn');
+  try {
+    talkRec = new SpeechRec();
+    talkRec.lang = 'en-GB'; talkRec.interimResults = true; talkRec.continuous = true;
+    const before = ta.value ? `${ta.value.trim()} ` : '';
+    talkRec.onresult = e => { ta.value = before + [...e.results].map(r => r[0].transcript).join(' ').replace(/\s+/g, ' ').trim(); };
+    talkRec.onerror = e => { talkStop(); if (e.error !== 'aborted' && e.error !== 'no-speech') { toast('Microphone not available here — tap the mic on your keyboard instead', true); ta.focus(); } };
+    talkRec.onend = () => { talkRec = null; btn?.classList.remove('on'); if (btn) btn.querySelector('span').textContent = 'Tap and speak'; };
+    talkRec.start();
+    btn.classList.add('on'); btn.querySelector('span').textContent = 'Listening… tap to stop';
+  } catch (err) { console.error(err); talkStop(); toast('Microphone not available — tap the mic on your keyboard instead', true); ta.focus(); }
+}
+
+// ======================================================================
+// Mileage log (HMRC: 45p a mile for the first 10,000 business miles each tax year, then 25p)
+// ======================================================================
+function mileAllowance(miles) { return Math.min(miles, 10000) * 0.45 + Math.max(0, miles - 10000) * 0.25; }
+function mileageCardHtml(ty) {
+  if (S.data.mileageMissing) return '';
+  const inTy = iso => iso && taxYearOf(String(iso).slice(0, 10)) === ty;
+  const trips = (S.data.mileage || []).filter(m => inTy(m.trip_date));
+  const per = w => sum(trips.filter(m => m.who === w).map(m => num(m.miles)));
+  const recent = (S.data.mileage || []).slice().sort((a, b) => String(b.trip_date).localeCompare(String(a.trip_date))).slice(0, 6);
+  return `<section class="card mileage">
+    <div class="row"><h3>Mileage</h3><button class="btn small primary" data-act="tripSheet">${ICON.plus} Log a trip</button></div>
+    <div class="money-grid">${['a', 'b'].map(w => `<div><span>${esc(nameOf(w))}</span><b>${per(w).toLocaleString('en-GB')} mi</b><em>${money(mileAllowance(per(w)))} to claim</em></div>`).join('')}</div>
+    ${recent.length ? recent.map(m => { const j = m.job_id ? jobById(m.job_id) : null; return `<button class="item kv" data-act="tripSheet" data-id="${m.id}"><span>${fmtShort(m.trip_date)} · ${esc(nameOf(m.who))} <em class="muted">${esc(j ? jobName(j) : m.purpose || '')}</em></span><b>${num(m.miles)} mi</b></button>`; }).join('') : '<p class="muted small">Log business trips (to jobs, merchants, quotes). It adds up fast — HMRC allows 45p a mile for the first 10,000 miles a year each.</p>'}
+    <p class="muted small">Only claim this way if you use HMRC's simplified mileage for the van — check with your accountant.</p>
+  </section>`;
+}
+function tripSheet(id, jobId) {
+  const m = id ? (S.data.mileage || []).find(x => x.id === id) : null;
+  const jid = m?.job_id || jobId || '';
+  const j = jid ? jobById(jid) : null;
+  const who = m?.who || (S.meKnown ? S.me : 'a');
+  openSheet(`<form data-form="trip" class="form">
+    ${sheetHead(m ? 'Trip' : 'Log a trip', m ? m.id : null, m ? 'mileage' : null)}
+    <input type="hidden" name="id" value="${m?.id || ''}">
+    <input type="hidden" name="job_id" value="${esc(jid)}">
+    <div class="seg3">${['a', 'b'].map(w => `<label class="${who === w ? 'on' : ''}"><input type="radio" name="who" value="${w}" ${who === w ? 'checked' : ''} data-input="segpick">${esc(nameOf(w))}</label>`).join('')}</div>
+    <div class="two"><label>Date<input type="date" name="trip_date" value="${esc(m?.trip_date || today())}"></label>
+      <label>Miles<input type="number" name="miles" inputmode="decimal" step="0.1" min="0.1" required value="${m ? num(m.miles) : ''}" placeholder="e.g. 12"></label></div>
+    ${m ? '' : '<label class="check"><input type="checkbox" name="return" checked> There and back (doubles the miles)</label>'}
+    <div class="field-label">Which job? <span class="muted small">(optional)</span></div>
+    <div class="job-pick" id="trip-jobpick">${j ? `<div class="job-chosen">${ICON.jobs}<span><b>${esc(jobName(j))}</b></span><button type="button" data-act="tripClearJob" aria-label="Clear">×</button></div>`
+      : `<input type="search" id="trip-jobq" placeholder="Start typing an address or name…" autocomplete="off" data-input="tripJobQ"><div id="trip-suggest"></div>`}</div>
+    <label>Or what for <span class="muted small">(optional)</span><input name="purpose" value="${esc(m?.purpose || '')}" placeholder="e.g. Plumb Center, quote visit"></label>
+    <button class="btn primary wide big">Save trip</button>
+  </form>`);
+  if (!m) setTimeout(() => sheet.querySelector('[name=miles]')?.focus(), 60);
+}
+
+// ======================================================================
+// First-time tips: a short hint the first time each screen is opened (per phone)
+// ======================================================================
+const TIPS = {
+  jobs: 'This is your day at a glance. The big buttons do the everyday jobs, and <b>Tell Claude</b> lets you say what happened instead of typing. Tap any job to open it.',
+  job: 'Everything about one job. The top buttons call the customer or get directions. Costs, payments and photos are further down, and <b>Aftercare</b> keeps guarantees and service reminders.',
+  quotes: 'Pick C&B or Henry The Plumber, then <b>Fill from a job</b> to fill everything in. List the work, add the total, then <b>Make quote</b> and <b>Send PDF</b>.',
+  contacts: 'Every customer from your jobs is here automatically. Tap <b>+</b> to add suppliers or trades. Tap a name to see everything you’ve done for them.',
+  money: 'Profit, bills and where your work comes from. Log tool and van stock buys and mileage here.',
+  calendar: 'Tap a day to see what’s on. The <b>+</b> adds a visit, a collection or a day off.',
+  inbox: 'Send photos of receipts or type what needs adding. Claude sorts them at 8am and 5pm — nothing changes until you press <b>Approve</b>.',
+  notes: 'Anything that doesn’t fit elsewhere — key safe codes, trade account numbers, things to buy.',
+};
+function tipsSeen() { try { return JSON.parse(localStorage.getItem('cb-tips') || '{}'); } catch { return {}; } }
+function tipHtml(view) {
+  if (!TIPS[view] || tipsSeen()[view]) return '';
+  return `<div class="tip" id="tip"><span class="tip-ico">💡</span><div>${TIPS[view]}</div><button class="btn small" data-act="tipDone" data-v="${view}">Got it</button></div>`;
+}
+
 // ======================================================================
 // Recent changes: who changed what (recorded by the database)
 // ======================================================================
@@ -1569,6 +1674,7 @@ function jobsView() {
     <a href="#/inbox">${ICON.upload}<span>Add a receipt<br>or invoice</span></a>
     <a href="#/chat">${ICON.chat}<span>Message<br>${esc(other)}</span></a>
     <a href="#/contacts">${ICON.people}<span>Find a<br>customer</span></a>
+    ${S.data.inboxMissing ? '' : `<button type="button" class="home-talk" data-act="talkSheet">${ICON.mic}<span><b>Tell Claude</b><em>Say what happened — "Joshua paid £200 by bank"</em></span></button>`}
   </div>
 
   ${inboxBannerHtml()}
@@ -1949,6 +2055,7 @@ function overviewTab(j, c) {
     ${isPre(j) || j.status === 'declined' ? `<a class="btn" href="#/quotes/job-invoice/${j.id}">${ICON.doc} Invoice</a>` : `<a class="btn" href="#/quotes/job-quote/${j.id}">${ICON.doc} Quote</a>`}
     ${S.data.eventsMissing ? '' : `<button class="btn" data-act="evSheet" data-job="${j.id}">+ Calendar</button>`}
     <button class="btn" data-act="duplicate" data-id="${j.id}">Duplicate</button>
+    ${S.data.mileageMissing ? '' : `<button class="btn" data-act="tripSheet" data-job="${j.id}">${ICON.car} Log a trip</button>`}
     ${S.data.messagesMissing ? '' : `<button class="btn" data-act="msgSheet" data-job="${j.id}">${ICON.chat} Message ${esc(nameOf(otherOf(S.me)))}</button>`}
   </div>
   <button class="link-btn danger-link" data-act="deleteJob" data-id="${j.id}">Delete this job</button>`;
@@ -2145,11 +2252,38 @@ function priceSheet(id) {
     <input type="hidden" name="id" value="${j.id}">
     <p class="muted small">${esc(jobName(j))} · currently <b>${money(num(j.price))}</b>${j.vat_applies ? ' + VAT' : ''}</p>
     <label>New price${j.vat_applies || st.vat_registered ? ' (ex VAT)' : ''} £<input name="price" type="number" inputmode="decimal" step="0.01" min="0" value="${esc(j.price ?? '')}" required></label>
+    <details class="ph" ${isPre(j) || !num(j.price) ? 'open' : ''}><summary>Help me work it out</summary>
+      <div class="two"><label>Materials £<input class="ph-in" name="ph_mat" type="number" inputmode="decimal" step="0.01" value="${r2(calc(j).totalCost) || ''}" placeholder="0"></label>
+        <label>Mark-up %<input class="ph-in" name="ph_markup" type="number" inputmode="decimal" step="1" value="${num(st.markup_pct)}"></label></div>
+      <div class="two"><label>Labour days<input class="ph-in" name="ph_days" type="number" inputmode="decimal" step="0.5" placeholder="0"></label>
+        <label>Day rate £<input class="ph-in" name="ph_rate" type="number" inputmode="decimal" step="1" value="${num(st.day_rate) || ''}" placeholder="e.g. 220"></label></div>
+      <label>Anything else £ <span class="muted small">(skip, parking, travel)</span><input class="ph-in" name="ph_extra" type="number" inputmode="decimal" step="0.01" placeholder="0"></label>
+      <div class="ph-out" id="ph-out"></div>
+      <button type="button" class="btn wide" data-act="phUse">Use this price</button>
+    </details>
     <button class="btn primary wide big">Save new price</button>
   </form>`);
+  phCalc();
   setTimeout(() => { const i = sheet.querySelector('[name=price]'); i?.focus(); i?.select(); }, 60);
 }
 
+// Price helper: materials + mark-up + labour (+ extras)
+function phCalc() {
+  const f = sheet.querySelector('form[data-form=price]');
+  const out = document.getElementById('ph-out');
+  if (!f || !out) return 0;
+  const g = n => num(f.querySelector(`[name=${n}]`)?.value);
+  const mat = g('ph_mat'), mk = g('ph_markup'), days = g('ph_days'), rate = g('ph_rate'), extra = g('ph_extra');
+  const matCharge = mat * (1 + mk / 100), labour = days * rate;
+  const total = Math.ceil((matCharge + labour + extra) / 5) * 5; // round up to the nearest £5
+  out.innerHTML = total > 0 ? `<div class="kv"><span>Materials ${money(mat)} + ${mk}%</span><b>${money(matCharge)}</b></div>
+    ${labour ? `<div class="kv"><span>Labour ${days} day${days === 1 ? '' : 's'} × ${money(rate)}</span><b>${money(labour)}</b></div>` : ''}
+    ${extra ? `<div class="kv"><span>Extras</span><b>${money(extra)}</b></div>` : ''}
+    <div class="kv ph-total"><span>Suggested price <em class="muted">(rounded up to £5)</em></span><b>${money(total)}</b></div>
+    <div class="muted small">Profit on that: about ${money(total - mat)} before overheads</div>` : '<p class="muted small">Fill in materials and labour to get a suggested price.</p>';
+  out.dataset.total = total;
+  return total;
+}
 function noteSheet(id) {
   if (S.data.notesMissing) { toast('Notes need the database set up: run supabase/schema.sql in Supabase', true); return; }
   const n = id ? (S.data.notes || []).find(x => x.id === id) : { text: '', pinned: false };
@@ -2632,6 +2766,7 @@ function moneyView() {
   </section>
 
   ${sourcesCardHtml(ty, cur)}
+  ${mileageCardHtml(ty)}
 
   <h2 class="section-title" id="overheads">Overheads</h2>
   ${overheadsBody()}
@@ -2755,6 +2890,7 @@ function settingsView() {
     <p class="muted small">Signed in as ${S.meKnown ? `<b>${esc(nameOf(S.me))}</b> · ` : ''}${esc(S.session?.user?.email || '')}${S.live ? ' · <span class="live-dot"></span> live sync on' : ''}<br>App version ${APP_VERSION}</p>
     <div class="btn-row wrap">
       <button class="btn" data-act="refresh">${ICON.refresh} Refresh now</button>
+      <button class="btn" data-act="tipsReset">Show tips again</button>
       ${DEMO ? '' : '<button class="btn" data-act="changePw">Change password</button>'}
       ${DEMO ? '<button class="btn" data-act="seed">Load sample jobs</button><button class="btn danger" data-act="resetDemo">Wipe demo data</button>' : '<button class="btn" data-act="signout">Sign out</button>'}
     </div>
@@ -3108,6 +3244,7 @@ function openSheet(html) {
   document.body.classList.add('noscroll');
 }
 function closeSheet() {
+  if (typeof talkStop === 'function') talkStop();
   sheet.hidden = true;
   sheet.innerHTML = '';
   document.body.classList.remove('noscroll');
@@ -3261,6 +3398,25 @@ function getPayer() { try { const v = localStorage.getItem('cb-payer'); return v
 function setPayer(p) { if (p !== 'a' && p !== 'b') return; S.payer = p; try { localStorage.setItem('cb-payer', p); } catch { /* ignore */ } }
 
 const FORMS = {
+  async talk(fd, form) {
+    const text = String(fd.get('text') || '').trim();
+    if (!text) { toast('Say or type something first', true); return; }
+    talkStop();
+    await busy(form.querySelector('button.primary'), async () => {
+      await saveRow('inbox_items', null, { kind: 'request', status: 'new', text, created_by: myEmail(), paid_by: S.meKnown ? S.me : null, updated_at: new Date().toISOString() });
+      closeSheet(); render(); toast('Sent to Claude');
+    });
+  },
+  async trip(fd, form) {
+    await busy(form.querySelector('button.primary'), async () => {
+      let miles = num(fd.get('miles'));
+      if (!(miles > 0)) throw new Error('Put in the miles');
+      if (fd.get('return') === 'on') miles *= 2;
+      const row = { trip_date: fd.get('trip_date') || today(), who: fd.get('who') || 'a', miles: r2(miles), job_id: fd.get('job_id') || null, purpose: String(fd.get('purpose') || '').trim() || null };
+      await saveRow('mileage', fd.get('id') || null, row);
+      closeSheet(); render(); toast(`Trip saved — ${r2(miles)} miles`);
+    });
+  },
   async guarantee(fd) {
     await saveRow('jobs', fd.get('id'), { guarantee_until: fd.get('until') || null, guarantee_note: String(fd.get('note') || '').trim() || null });
     closeSheet(); render(); toast('Guarantee saved');
@@ -3646,6 +3802,28 @@ const FORMS = {
 };
 
 const ACT = {
+  talkSheet() { talkSheet(); },
+  talkMic() { talkMic(); },
+  tripSheet(d) { tripSheet(d.id, d.job); },
+  tripClearJob() { const f = sheet.querySelector('form[data-form=trip]'); f.querySelector('[name=job_id]').value = ''; document.getElementById('trip-jobpick').innerHTML = '<input type="search" id="trip-jobq" placeholder="Start typing an address or name…" autocomplete="off" data-input="tripJobQ"><div id="trip-suggest"></div>'; },
+  tripPickJob(d) {
+    const j = jobById(d.id); const f = sheet.querySelector('form[data-form=trip]'); if (!j || !f) return;
+    f.querySelector('[name=job_id]').value = j.id;
+    document.getElementById('trip-jobpick').innerHTML = `<div class="job-chosen">${ICON.jobs}<span><b>${esc(jobName(j))}</b></span><button type="button" data-act="tripClearJob" aria-label="Clear">×</button></div>`;
+  },
+  tipDone(d) { const t = tipsSeen(); t[d.v] = 1; try { localStorage.setItem('cb-tips', JSON.stringify(t)); } catch { /* ignore */ } document.getElementById('tip')?.remove(); },
+  tipsReset() { try { localStorage.removeItem('cb-tips'); } catch { /* ignore */ } toast('Tips will show again'); },
+  async phUse() {
+    const total = phCalc();
+    if (!total) { toast('Fill in materials or labour first', true); return; }
+    const f = sheet.querySelector('form[data-form=price]');
+    f.querySelector('[name=price]').value = total;
+    // remember the mark-up and day rate for next time
+    const mk = num(f.querySelector('[name=ph_markup]').value), rate = num(f.querySelector('[name=ph_rate]').value);
+    const st = set();
+    if (mk !== num(st.markup_pct) || (rate && rate !== num(st.day_rate))) { const data = { ...st, markup_pct: mk, day_rate: rate || st.day_rate }; db.saveSettings(data).then(() => { S.data.settings = data; }).catch(console.error); }
+    toast(`Price set to ${money(total)} — tap Save`);
+  },
   actFilter(d) { S.actF = d.f; render(); },
   pickPeriod(d, el) { const f = el.closest('form'); f.querySelector('input[type=date]').value = d.d; f.querySelectorAll('.chips .chip').forEach(c => c.classList.toggle('on', c === el)); },
   guaranteeSheet(d) {
@@ -4388,7 +4566,7 @@ function qSetField(el) {
   } else return;
   qKeep();
 }
-document.addEventListener('input', e => { if (e.target.closest?.('.q-form')) qSetField(e.target); });
+document.addEventListener('input', e => { if (e.target.closest?.('.q-form')) qSetField(e.target); if (e.target.classList?.contains('ph-in')) phCalc(); });
 document.addEventListener('change', e => { if (e.target.closest?.('.q-form') && (e.target.type === 'radio' || e.target.type === 'checkbox')) qSetField(e.target); });
 
 // Drag invoices onto the inbox page (computer)
@@ -4425,6 +4603,7 @@ document.addEventListener('input', e => {
   if (k === 'search') { S.search = e.target.value; const el = document.getElementById('job-list'); if (el) el.innerHTML = route().view === 'jobs' && !String(S.search).trim() ? homeGroupsHtml() : jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJobQ') { S.chatJobQ = e.target.value; const el = document.getElementById('chat-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5); }
+  if (k === 'tripJobQ') { const el = document.getElementById('trip-suggest'); if (el) el.innerHTML = jobSuggestHtml(e.target.value, 'tripPickJob', 5); }
   if (k === 'srcpick') e.target.closest('.src-pick').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target)));
   if (k === 'contactsQ') { S.contactsQ = e.target.value; const el = document.getElementById('ct-list'); if (el) el.innerHTML = contactRowsHtml(); }
   if (k === 'qJobQ') { S.qJobQ = e.target.value; const el = document.getElementById('q-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.qJobQ, 'qPickJob'); }

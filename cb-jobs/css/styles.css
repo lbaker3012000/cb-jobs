@@ -1194,3 +1194,32 @@ html[data-theme="dark"] .act-who { color: var(--gold); }
 .src-cta { margin-top: 10px; padding: 10px; border-radius: 10px; font-size: .9rem; background: var(--bg); }
 .src-cta.ok { background: rgba(46,125,79,.1); }
 .src-cta.warn { background: rgba(200,60,60,.08); }
+/* Tell Claude */
+.home-talk { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 12px 16px; border-radius: 16px; border: 2px solid var(--gold); background: rgba(217,165,91,.12); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.home-talk svg { width: 30px; height: 30px; flex: none; color: var(--gold-deep); }
+.home-talk span { display: flex; flex-direction: column; }
+.home-talk b { font-size: 1.05rem; }
+.home-talk em { font-style: normal; font-size: .82rem; color: var(--muted); }
+html[data-theme="dark"] .home-talk svg { color: var(--gold); }
+.talk-eg { margin: 0 0 12px 18px; padding: 0; }
+.talk-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 4px auto 14px; width: 132px; height: 132px; border-radius: 50%; border: 0; background: var(--navy); color: #fff; font: inherit; font-weight: 700; font-size: .85rem; cursor: pointer; justify-content: center; }
+.talk-btn svg { width: 44px; height: 44px; color: var(--gold); }
+.talk-btn.on { background: #c0392b; animation: talkpulse 1.2s infinite; }
+@keyframes talkpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(192,57,43,.45); } 50% { box-shadow: 0 0 0 16px rgba(192,57,43,0); } }
+.talk textarea { width: 100%; font-size: 1.05rem; }
+/* Price helper */
+.ph { margin: 4px 0 14px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--bg); }
+.ph summary { font-weight: 700; cursor: pointer; color: var(--gold-deep); }
+html[data-theme="dark"] .ph summary { color: var(--gold); }
+.ph[open] summary { margin-bottom: 10px; }
+.ph-out { margin: 6px 0 10px; }
+.ph-total b { font-size: 1.2rem; }
+/* Mileage */
+.mileage .row { align-items: center; margin-bottom: 8px; }
+.mileage .row h3 { margin: 0; }
+.mileage button.item { width: 100%; background: none; border: 0; border-top: 1px solid var(--line); font: inherit; color: inherit; text-align: left; padding: 9px 0; cursor: pointer; }
+/* First-time tips */
+.tip { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 12px; padding: 12px; border-radius: 14px; background: rgba(217,165,91,.14); border: 1px solid rgba(217,165,91,.5); font-size: .92rem; line-height: 1.4; }
+.tip-ico { font-size: 1.2rem; }
+.tip > div { flex: 1; }
+.tip .btn { flex: none; }
