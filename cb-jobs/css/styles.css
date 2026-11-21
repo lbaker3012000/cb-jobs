@@ -22,6 +22,8 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
 }
+@font-face { font-family: Atkinson; font-weight: 400; font-display: swap; src: url(../fonts/atkinson-hyperlegible-latin-400-normal.woff2) format('woff2'); }
+@font-face { font-family: Atkinson; font-weight: 700; font-display: swap; src: url(../fonts/atkinson-hyperlegible-latin-700-normal.woff2) format('woff2'); }
 @font-face { font-family: Poppins; font-weight: 400; font-display: swap; src: url(../fonts/poppins-latin-400-normal.woff2) format('woff2'); }
 @font-face { font-family: Poppins; font-weight: 500; font-display: swap; src: url(../fonts/poppins-latin-500-normal.woff2) format('woff2'); }
 @font-face { font-family: Poppins; font-weight: 600; font-display: swap; src: url(../fonts/poppins-latin-600-normal.woff2) format('woff2'); }
@@ -1224,53 +1226,80 @@ html[data-theme="dark"] .ph summary { color: var(--gold); }
 .tip > div { flex: 1; }
 .tip .btn { flex: none; }
 
-/* ===== Text colour schemes (Settings → Text colours). Header banner is left alone. ===== */
-html[data-text="hc"]   { --ink: #000; --muted: #33393f; --acc: #0d2131; }
-html[data-text="blue"] { --ink: #0a1620; --muted: #3c4853; --acc: #0b5cad; }
-html[data-text="warm"] { --ink: #1f150a; --muted: #4d4234; --acc: #8a5410; }
-html[data-theme="dark"][data-text="hc"]   { --ink: #fff; --muted: #dfe5ea; --acc: #fff; }
-html[data-theme="dark"][data-text="blue"] { --ink: #fff; --muted: #d3dde6; --acc: #8fd0ff; }
-html[data-theme="dark"][data-text="warm"] { --ink: #fff4e0; --muted: #e6d9c3; --acc: #ffd27a; }
-html[data-text="hc"] body { font-weight: 500; }
-html[data-text="hc"] h4, html[data-text="hc"] .muted { font-weight: 500; }
-/* plain links */
-html.tx a:where(:not(.top a)) { color: var(--ink); }
-html.tx a.muted, html.tx a:not([class]), html.tx .link-btn, html.tx .hero-profile, html.tx .ct-go,
-html.tx .group, html.tx .hint, html.tx .big3 .change, html.tx .act-who, html.tx .ph summary,
-html.tx .chat-attach.on, html.tx .cover .row b, html.tx .mdow, html.tx .tabs a.on { color: var(--acc); }
-html.tx a.muted, html.tx a:not([class]), html.tx .link-btn { text-decoration: underline; text-underline-offset: 3px; }
-html.tx .tabs a { color: var(--muted); }
-html.tx .home-actions a:not(:first-child) { color: var(--ink); }
-html.tx .group { font-weight: 700; }
-/* keep buttons readable on their own backgrounds */
-html.tx a.btn.primary, html[data-theme="dark"].tx a.btn.primary { color: var(--navy); }
-html.tx:not([data-theme="dark"]) a.btn.primary { color: #fff; }
-html.tx .home-actions a:first-child { color: #fff; }
-html[data-theme="dark"].tx .home-actions a:first-child { color: #0c1a24; }
+/* ======================================================================
+   Reading comfort (Nov 2026) — built on dyslexia / visual-stress guidance:
+   tinted (never white) single-colour backgrounds, dark-not-black text,
+   no stripes or dashed lines, no underlines or capitals-with-spacing,
+   a legibility font and roomier lines. The header banner is untouched.
+   ====================================================================== */
+:root { --acc: #6e430b; }
+:root, html[data-tint="cream"] { --bg: #f2e8d5; --card: #f9f2e4; --line: #d9cbb0; --ink: #1d2a36; --muted: #46505a; --soft: #ebdfc8; }
+html[data-tint="peach"]  { --bg: #f6dcc8; --card: #fbeadd; --line: #e2c0a6; --soft: #efd0b9; --ink: #1d2a36; --muted: #4a4a4c; }
+html[data-tint="yellow"] { --bg: #f3ebbd; --card: #faf5d8; --line: #ddd196; --soft: #ece2a9; --ink: #1d2a36; --muted: #4a4d48; }
+html[data-tint="aqua"]   { --bg: #d6eaec; --card: #e8f4f5; --line: #b2d0d5; --soft: #c7e0e3; --ink: #1d2a36; --muted: #415058; --acc: #134f63; }
+html[data-theme="dark"] { --bg: #1b232c; --card: #242e39; --line: #3a4856; --ink: #e2dbcd; --muted: #b8bfc5; --soft: #2d3946; --acc: #e7bd78; }
 
-/* Bigger text — the header stays its normal size */
+body { font-family: Atkinson, Verdana, -apple-system, "Segoe UI", Arial, sans-serif; font-size: 17px; line-height: 1.55; letter-spacing: .01em; background: var(--bg); }
+h1, h2, h3, .wordmark, .home-hello h2 { font-family: Poppins, Arial, sans-serif; }
+.inv-paper, .inv-paper * { letter-spacing: normal; }
+
+/* Cards and controls sit on a tint too — no bright white panels */
+.card, .home-actions a:not(:first-child), .home-archive, .modal-box, .sheet, .chip, .btn:not(.primary):not(.danger),
+.sday.free:not(.wkend):not(.today), .tick:not(.on), .add-day, .cal-item, .mday, .look-opt, .item, input, select, textarea { background-color: var(--card); }
+html:not([data-theme="dark"]) .tabs { background: var(--card); border-top: 1px solid var(--line); }
+.card { box-shadow: none; border: 1px solid var(--line); }
+input, select, textarea { border-color: var(--line); color: var(--ink); }
+.mdow { background: var(--soft); }
+
+/* Text: dark (not black), muted text kept strong enough to read */
+.muted, .job-who, .hero-who, .home-ghead .chev, h4 { color: var(--muted); }
+
+/* Links: bold colour, no underlines */
+main a:not([class]), a.muted, .link-btn, .hero-profile, .ct-go { color: var(--acc); font-weight: 700; text-decoration: none; }
+html[data-theme="dark"] main a:not([class]), html[data-theme="dark"] a.muted, html[data-theme="dark"] .link-btn { color: var(--acc); }
+.home-actions a:not(:first-child), html[data-theme="dark"] .home-actions a:not(:first-child) { color: var(--ink); }
+a.card, a.item, a.kv, a.ct-row, a.q-row, a.ct-job, a.cal-item, a.strip-head, a.home-archive, a.msg-banner { color: var(--ink); }
+
+/* No capitals-with-wide-spacing headings */
+.group, .act-day, .mdow, .ib-act em, .oh-big span, .pill, .cal-item .tag, .day-badge, .q-tag { text-transform: none; letter-spacing: 0; }
+.group { font-size: .95rem; font-weight: 700; color: var(--acc); }
+.pill, .cal-item .tag, .day-badge, .q-tag { font-size: .78rem; }
+.mdow { font-size: .75rem; }
+
+/* No stripes, hatching or dashed lines (these are the patterns that cause visual stress) */
+.sday.away, html[data-theme="dark"] .sday.away { background: var(--soft); }
+.mbar.away, html[data-theme="dark"] .mbar.away { background: var(--soft); color: var(--muted); }
+.kv, .bill-row { border-bottom-style: solid; }
+.home-tmr { border-top-style: solid; }
+.sday.free:not(.wkend):not(.today) { border-style: solid; }
+.cal-item.job.quoted { border-left-style: solid; }
+.dropzone { border-style: solid; }
+
+/* Bottom tabs: readable labels */
+.tabs a { color: var(--muted); font-size: .74rem; }
+.tabs a.on, html[data-theme="dark"] .tabs a.on { color: var(--acc); font-weight: 700; }
+html[data-theme="dark"] .tabs { background: #161d25; }
+
+/* Dark mode: soft light text, never pure white */
+html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] textarea { background-color: #1d262f; }
+html[data-theme="dark"] .home-actions a:first-child { color: #1b232c; }
+
+/* Text size (Settings → Reading comfort). The header stays its normal size. */
 html[data-size="big"] { font-size: 112.5%; }
-html[data-size="big"] body { font-size: 17px; }
-html[data-size="big"] .top h1 { font-size: 16.32px; }
-html[data-size="big"] .top .wordmark { font-size: 20px; }
-html[data-size="big"] .tabs a { font-size: .68rem; }
+html[data-size="big"] body { font-size: 19px; }
+html[data-size="huge"] { font-size: 125%; }
+html[data-size="huge"] body { font-size: 21px; }
+html[data-size="big"] .top h1, html[data-size="huge"] .top h1 { font-size: 16.32px; }
+html[data-size="big"] .top .wordmark, html[data-size="huge"] .top .wordmark { font-size: 20px; }
+html[data-size="big"] .tabs a, html[data-size="huge"] .tabs a { font-size: 11.5px; }
 
-/* Picker in Settings — each option shows its own colours on the current background */
-.look-opts { display: grid; gap: 8px; margin: 10px 0 4px; }
-.look-opt { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; padding: 12px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--card); font: inherit; cursor: pointer; }
-.look-opt b { font-size: 1rem; }
-.look-opt span { grid-column: 1; font-size: .82rem; }
-.look-opt em { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-style: normal; font-size: .85rem; }
+/* Picker */
+.look-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 4px; }
+.look-opt { text-align: left; padding: 12px 14px; border-radius: 14px; border: 2px solid var(--line); font: inherit; cursor: pointer; color: #1d2a36; }
+.look-opt b { display: block; font-size: 1rem; }
+.look-opt span { font-size: .85rem; color: #46505a; }
 .look-opt.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
-.look-opt.on b::after { content: ' ✓'; color: var(--gold-deep); }
+.look-opt.on b::after { content: ' ✓'; color: #8a5a14; }
+.look-opt.t-cream { background: #f2e8d5; } .look-opt.t-dark { background: #242e39; color: #e2dbcd; } .look-opt.t-dark span { color: #b8bfc5; } .look-opt.t-peach { background: #f6dcc8; }
+.look-opt.t-yellow { background: #f3ebbd; } .look-opt.t-aqua { background: #d6eaec; }
 .look-h { margin-top: 16px; }
-.sc-classic b { color: #0d2131; } .sc-classic span { color: #6b7178; } .sc-classic em { color: #a8742e; }
-.sc-hc b { color: #000; } .sc-hc span { color: #33393f; font-weight: 500; } .sc-hc em { color: #0d2131; text-decoration: underline; }
-.sc-blue b { color: #0a1620; } .sc-blue span { color: #3c4853; } .sc-blue em { color: #0b5cad; text-decoration: underline; }
-.sc-warm b { color: #1f150a; } .sc-warm span { color: #4d4234; } .sc-warm em { color: #8a5410; text-decoration: underline; }
-html[data-theme="dark"] .sc-classic b { color: #ece6da; } html[data-theme="dark"] .sc-classic span { color: #97a2ac; } html[data-theme="dark"] .sc-classic em { color: #d9a55b; }
-html[data-theme="dark"] .sc-hc b, html[data-theme="dark"] .sc-hc em { color: #fff; } html[data-theme="dark"] .sc-hc span { color: #dfe5ea; }
-html[data-theme="dark"] .sc-blue b { color: #fff; } html[data-theme="dark"] .sc-blue span { color: #d3dde6; } html[data-theme="dark"] .sc-blue em { color: #8fd0ff; }
-html[data-theme="dark"] .sc-warm b { color: #fff4e0; } html[data-theme="dark"] .sc-warm span { color: #e6d9c3; } html[data-theme="dark"] .sc-warm em { color: #ffd27a; }
-html[data-theme="dark"] .look-opt.on b::after { color: var(--gold); }
-html.tx .home-actions a { text-decoration: none; }

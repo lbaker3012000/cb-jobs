@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121h';
-const VERSION_TAG = '20261121h';
+import { db, DEMO } from './db.js?v=20261121i';
+const VERSION_TAG = '20261121i';
 
-const APP_VERSION = '21 Nov 2026 (8)';
+const APP_VERSION = '21 Nov 2026 (9)';
 
 // ======================================================================
 // State & helpers
@@ -2857,30 +2857,31 @@ function notifCardHtml() {
     </div>`;
 }
 
-// Text colours + size — per phone, so Henry and Luke can each pick their own
-const TEXT_SCHEMES = [
-  ['classic', 'Gold and grey', 'How it looked to start with'],
-  ['hc', 'Black and white', 'Clearest — plain, strong text'],
-  ['blue', 'White and blue', 'Links and headings in blue'],
-  ['warm', 'Cream and yellow', 'Softer, warmer, still bright'],
+// Reading comfort — background tint + text size, per phone (Henry and Luke each pick their own)
+const TINTS = [
+  ['cream', 'Cream', 'Recommended starting point'],
+  ['peach', 'Peach', 'Warm — read fastest in tests'],
+  ['yellow', 'Pale yellow', 'Warm and bright'],
+  ['aqua', 'Soft blue', 'Cooler, calm'],
+  ['dark', 'Dark', 'For evenings and bright glare'],
 ];
-const lookGet = () => { try { return { text: localStorage.getItem('cb-text') || 'classic', size: localStorage.getItem('cb-size') || 'normal' }; } catch { return { text: 'classic', size: 'normal' }; } };
+const lookGet = () => { try { return { tint: localStorage.getItem('cb-tint') || 'cream', size: localStorage.getItem('cb-size') || 'normal' }; } catch { return { tint: 'cream', size: 'normal' }; } };
 function lookApply() {
-  const { text, size } = lookGet(), h = document.documentElement;
-  h.dataset.text = text; h.dataset.size = size;
-  h.classList.toggle('tx', text !== 'classic');
+  const { tint, size } = lookGet(), h = document.documentElement;
+  h.dataset.tint = tint; h.dataset.size = size;
 }
 function lookCardHtml() {
-  const { text, size } = lookGet();
-  return `<h3>Text colours</h3>
-    <p class="muted small">Pick whichever is easiest to read. It only changes this phone.</p>
-    <div class="look-opts">${TEXT_SCHEMES.map(([k, name, sub]) => `<button type="button" class="look-opt sc-${k}${k === text ? ' on' : ''}" data-act="setText" data-k="${k}" aria-pressed="${k === text}">
-      <b>${name}</b><span>${sub}</span><em>Example link ›</em></button>`).join('')}</div>
+  const { tint, size } = lookGet(), cur = isDark() ? 'dark' : tint;
+  return `<h3>Reading comfort</h3>
+    <p class="muted small">Pick the background that's easiest on your eyes. It only changes this phone.</p>
+    <div class="look-opts">${TINTS.map(([k, name, sub]) => `<button type="button" class="look-opt t-${k}${k === cur ? ' on' : ''}" data-act="setTint" data-k="${k}" aria-pressed="${k === cur}"><b>${name}</b><span>${sub}</span></button>`).join('')}</div>
     <h3 class="look-h">Text size</h3>
-    <div class="btn-row">
-      <button type="button" class="chip${size === 'normal' ? ' on' : ''}" data-act="setSize" data-k="normal">Normal</button>
-      <button type="button" class="chip${size === 'big' ? ' on' : ''}" data-act="setSize" data-k="big">Bigger</button>
-    </div>`;
+    <div class="btn-row">${[['normal', 'Normal'], ['big', 'Bigger'], ['huge', 'Biggest']].map(([k, l]) => `<button type="button" class="chip${size === k ? ' on' : ''}" data-act="setSize" data-k="${k}">${l}</button>`).join('')}</div>`;
+}
+function setDark(dark) {
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  try { localStorage.setItem('cb-theme', dark ? 'dark' : 'light'); } catch { /* ignore */ }
+  document.querySelectorAll('.theme-switch').forEach(b => { b.setAttribute('aria-checked', dark); b.querySelector('i').innerHTML = dark ? ICON.moon : ICON.sun; });
 }
 
 function settingsView() {
@@ -3839,7 +3840,11 @@ const ACT = {
     document.getElementById('trip-jobpick').innerHTML = `<div class="job-chosen">${ICON.jobs}<span><b>${esc(jobName(j))}</b></span><button type="button" data-act="tripClearJob" aria-label="Clear">×</button></div>`;
   },
   tipDone(d) { const t = tipsSeen(); t[d.v] = 1; try { localStorage.setItem('cb-tips', JSON.stringify(t)); } catch { /* ignore */ } document.getElementById('tip')?.remove(); },
-  setText(d) { try { localStorage.setItem('cb-text', d.k); } catch { /* ignore */ } lookApply(); const c = document.getElementById('look-card'); if (c) c.innerHTML = lookCardHtml(); },
+  setTint(d) {
+    if (d.k === 'dark') setDark(true);
+    else { setDark(false); try { localStorage.setItem('cb-tint', d.k); } catch { /* ignore */ } }
+    lookApply(); const c = document.getElementById('look-card'); if (c) c.innerHTML = lookCardHtml();
+  },
   setSize(d) { try { localStorage.setItem('cb-size', d.k); } catch { /* ignore */ } lookApply(); const c = document.getElementById('look-card'); if (c) c.innerHTML = lookCardHtml(); },
   tipsReset() { try { localStorage.removeItem('cb-tips'); } catch { /* ignore */ } toast('Tips will show again'); },
   async phUse() {
@@ -4216,10 +4221,8 @@ const ACT = {
     location.replace(el.getAttribute('href'));
   },
   toggleTheme() {
-    const dark = !isDark();
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    try { localStorage.setItem('cb-theme', dark ? 'dark' : 'light'); } catch {}
-    document.querySelectorAll('.theme-switch').forEach(b => { b.setAttribute('aria-checked', dark); b.querySelector('i').innerHTML = dark ? ICON.moon : ICON.sun; });
+    setDark(!isDark());
+    const c = document.getElementById('look-card'); if (c) c.innerHTML = lookCardHtml();
   },
   async refresh(d, el) { await busy(el, async () => { await loadData(); S.urls = {}; render(); toast('Up to date'); }); },
   filter(d) { S.filter = d.f; render(); },
