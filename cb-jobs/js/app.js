@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121c';
-const VERSION_TAG = '20261121c';
+import { db, DEMO } from './db.js?v=20261121d';
+const VERSION_TAG = '20261121d';
 
-const APP_VERSION = '21 Nov 2026 (3)';
+const APP_VERSION = '21 Nov 2026 (4)';
 
 // ======================================================================
 // State & helpers
@@ -221,7 +221,7 @@ function todos() {
   }
   let lastBackup = null;
   try { lastBackup = localStorage.getItem('cb-last-backup'); } catch { /* ignore */ }
-  if (!DEMO && S.data.jobs.length >= 3 && (!lastBackup || daysSince(lastBackup) > 30)) out.push({ pri: 6, icon: '⤓', text: 'Download a backup', sub: lastBackup ? `Last one ${daysSince(lastBackup)} days ago (on this device)` : 'Keeps a copy of everything, just in case', backup: true });
+  if (false && lastBackup) out.push({ pri: 6, icon: '⤓', text: 'Download a backup', sub: lastBackup ? `Last one ${daysSince(lastBackup)} days ago (on this device)` : 'Keeps a copy of everything, just in case', backup: true });
   return out.sort((a, b) => a.pri - b.pri);
 }
 
@@ -402,7 +402,6 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
     ${tab('quotes', 'Quotes', ICON.doc)}
     ${tab('contacts', 'Contacts', ICON.people)}
     ${tab('notes', 'Notes', ICON.note)}
-    ${tab('archive', 'Archive', ICON.archive)}
     ${tab('money', 'Money', ICON.money)}
     ${tab('settings', 'Settings', ICON.cog)}
   </nav>` : ''}`;
@@ -969,6 +968,7 @@ function qPaperHtml(rec) {
   const cu = rec.customer || {};
   const paid = num(rec.paid_to_date);
   const pif = !isQuote && rec.paid_in_full;
+  const vat = num(b.vatRate);
   const cats = (rec.categories || []).map(cat => {
     const lines = (cat.lines || []).filter(l => l && String(l).trim());
     if (!cat.heading && !lines.length) return '';
@@ -1005,12 +1005,14 @@ function qPaperHtml(rec) {
         ? `<div class="inv-sub-row"><span>Total for all materials and labour:</span><span class="num">${qMoney(rec.total)}</span></div>
            <div class="inv-sub-row"><span>Less amount already paid${rec.paid_note ? ` (${esc(rec.paid_note)})` : ''}:</span><span class="num">−${qMoney(paid)}</span></div>
            <div class="inv-total-row"><span>${num(rec.total) - paid > 0.004 ? 'Balance due:' : 'Paid in full — balance:'}</span><span class="num">${qMoney(Math.max(0, num(rec.total) - paid))}</span></div>`
-        : `<div class="inv-total-row"><span>${isQuote ? 'Total Estimated Cost:' : 'Total Cost for all materials and labour:'}</span><span class="num">${qMoney(rec.total)}</span></div>`}
+        : `${vat ? `<div class="inv-sub-row"><span>Total before VAT:</span><span class="num">${qMoney(num(rec.total) / (1 + vat / 100))}</span></div>
+           <div class="inv-sub-row"><span>VAT @ ${vat}%:</span><span class="num">${qMoney(num(rec.total) - num(rec.total) / (1 + vat / 100))}</span></div>` : ''}
+           <div class="inv-total-row"><span>${isQuote ? `Total Estimated Cost${vat ? ' inc. VAT' : ''}:` : `Total Cost for all materials and labour${vat ? ' inc. VAT' : ''}:`}</span><span class="num">${qMoney(rec.total)}</span></div>`}
       <hr class="inv-rule">
     </div>
     <div class="inv-footer">
       <div>${b.phone ? `<div>${esc(b.phone)}</div>` : ''}${b.email ? `<div>${esc(b.email)}</div>` : ''}</div>
-      <div class="right"><strong>${esc(b.businessName || '')}</strong>${String(b.address || '').split('\n').filter(Boolean).map(l => `<div>${esc(l)}</div>`).join('')}</div>
+      <div class="right"><strong>${esc(b.businessName || '')}</strong>${b.vatNumber ? `<div>VAT no. ${esc(b.vatNumber)}</div>` : ''}${String(b.address || '').split('\n').filter(Boolean).map(l => `<div>${esc(l)}</div>`).join('')}</div>
     </div>
     ${cb ? '<div class="inv-band cf-tagline">Air Conditioning<i>&bull;</i>Bathrooms<i>&bull;</i>Plumbing &amp; Heating</div>' : '<div class="inv-band"></div>'}
     <div class="inv-trim"></div>
@@ -1021,6 +1023,8 @@ function qBusiness(profile, payTo, st = qSettings()) {
   const p = st[profile] || st.cb;
   const b = { businessName: p.businessName, tagline: p.tagline, phone: p.phone, email: p.email, address: p.address, accountName: p.accountName, sortCode: p.sortCode, accountNumber: p.accountNumber };
   if (profile === 'cb' && payTo === 'second') Object.assign(b, { accountName: p.altAccountName || '', sortCode: p.altSortCode || '', accountNumber: p.altAccountNumber || '' });
+  const g = set();
+  if (g.vat_registered && num(g.vat_rate) > 0) Object.assign(b, { vatRate: num(g.vat_rate), vatNumber: g.vat_number || '' });
   return b;
 }
 
@@ -1374,7 +1378,6 @@ function contactSheetHtml(c) {
 const isDark = () => document.documentElement.dataset.theme === 'dark';
 const themeSwitch = () => `<button class="theme-switch" data-act="toggleTheme" role="switch" aria-checked="${isDark()}" aria-label="Dark mode"><i>${isDark() ? ICON.moon : ICON.sun}</i></button>`;
 
-const refreshBtn = `<button class="icon-btn" data-act="refresh" aria-label="Refresh">${ICON.refresh}</button>`;
 const pill = s => `<span class="pill ${s}">${STATUS[s] || s}</span>`;
 
 // ======================================================================
@@ -1459,7 +1462,7 @@ function jobsView() {
   <div id="job-list">${searching ? jobListHtml() : homeGroupsHtml()}</div>
 
   ${stripHtml()}`;
-  return layout({ title: 'Home', right: refreshBtn, body });
+  return layout({ title: 'Home', body });
 }
 
 // The jobs, in plain groups: what's on now, booked in, quotes waiting, money owed
@@ -1488,7 +1491,9 @@ function homeGroupsHtml() {
     group('quotes', 'Quotes waiting for an answer', quotes, quotes.length ? money0(sum(quotes.map(j => calc(j).gross))) : ''),
     group('owed', 'Waiting to be paid', owed, owed.length ? money0(sum(owed.map(j => calc(j).balance))) : ''),
   ].join('');
-  return out || '<div class="empty">Nothing on at the moment. Tap <b>New job or quote</b> to add one.</div>';
+  const fin = jobs.filter(j => j.status === 'finished' || j.status === 'declined').length;
+  return (out || '<div class="empty">Nothing on at the moment. Tap <b>New job or quote</b> to add one.</div>')
+    + (fin ? `<a class="home-archive" href="#/archive">${ICON.archive}<span>Finished jobs <span class="muted">(${fin})</span></span><span class="chev">›</span></a>` : '');
 }
 
 // Due-date label for a to-do: overdue / today / tomorrow / date
@@ -1788,8 +1793,7 @@ function overviewTab(j, c) {
 
   ${jobDocsHtml(j)}
   <div class="action-grid">
-    <a class="btn" href="#/quotes/job-quote/${j.id}">${ICON.doc} Quote</a>
-    <a class="btn" href="#/quotes/job-invoice/${j.id}">${ICON.doc} Invoice</a>
+    ${j.status === 'quoted' || j.status === 'declined' ? `<a class="btn" href="#/quotes/job-invoice/${j.id}">${ICON.doc} Invoice</a>` : `<a class="btn" href="#/quotes/job-quote/${j.id}">${ICON.doc} Quote</a>`}
     ${S.data.eventsMissing ? '' : `<button class="btn" data-act="evSheet" data-job="${j.id}">+ Calendar</button>`}
     <button class="btn" data-act="duplicate" data-id="${j.id}">Duplicate</button>
     ${S.data.messagesMissing ? '' : `<button class="btn" data-act="msgSheet" data-job="${j.id}">${ICON.chat} Message ${esc(nameOf(otherOf(S.me)))}</button>`}
@@ -1962,7 +1966,7 @@ function notesView() {
   <button class="btn primary wide big" data-act="noteSheet">${ICON.plus} New note</button>
   ${all.length > 5 ? `<input class="search" type="search" placeholder="Search notes" value="${esc(S.noteSearch || '')}" data-input="noteSearch" style="margin-top:12px">` : ''}
   <div id="notes-list" style="margin-top:12px">${notesListHtml()}</div>`;
-  return layout({ title: 'Notes', right: refreshBtn, body });
+  return layout({ title: 'Notes', body });
 }
 
 function notesListHtml() {
@@ -2180,7 +2184,8 @@ function dayItemsHtml(iso, dd, compactEmpty = true) {
         <b>${esc(jobName(j))}</b>
         <div class="muted small">${esc(jobSub(j))}${j.status === 'quoted' ? ' · <i>pencilled in</i>' : ''}</div>
       </a>
-      ${addr && iso >= t && j.status !== 'finished' ? `<a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener">${ICON.pin}</a>` : ''}
+      ${iso === t && j.customer_phone ? `<a class="btn small" href="tel:${esc(String(j.customer_phone).replace(/[^\d+]/g, ''))}" aria-label="Call ${esc(j.customer_name || 'customer')}">${ICON.phone}</a>` : ''}
+      ${addr && iso >= t && j.status !== 'finished' ? `<a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener" aria-label="Directions">${ICON.pin}</a>` : ''}
     </div>`);
   });
   dd.events.filter(e => e.kind !== 'away').forEach(e => {
@@ -2296,7 +2301,7 @@ function calendarView() {
   </section>
   ${unscheduled.length ? `<h3 class="group">Won but no dates yet</h3><div class="list">${unscheduled.map(j => `<a class="item" href="#/edit/${j.id}"><div class="row"><strong>${esc(jobName(j))}</strong><span class="btn small">Set dates</span></div><div class="small muted">${esc(jobSub(j))}</div></a>`).join('')}</div>` : ''}`;
   const fab = S.data.eventsMissing ? '' : `<button class="fab" data-act="evSheet" data-date="${sel}" aria-label="Add calendar entry">${ICON.plus}</button>`;
-  return layout({ title: 'Calendar', right: refreshBtn, body, fab });
+  return layout({ title: 'Calendar', body, fab });
 }
 
 // Add / edit a calendar entry
@@ -2339,7 +2344,7 @@ function archiveView() {
     ${['all', ...years, 'declined'].map(y => `<button class="chip ${S.archiveYear === y ? 'on' : ''}" data-act="archiveYear" data-y="${y}">${y === 'all' ? 'All finished' : y === 'declined' ? 'Declined' : y}</button>`).join('')}
   </div>
   <div id="archive-list">${archiveListHtml()}</div>`;
-  return layout({ title: 'Archive', right: refreshBtn, body });
+  return layout({ title: 'Finished jobs', back: true, body });
 }
 
 function archiveListHtml() {
@@ -2433,18 +2438,8 @@ function moneyView() {
 
 
 
-  <h2 class="section-title">Backup</h2>
-  <section class="card">
-    <h3>Export</h3>
-    <div class="btn-row wrap">
-      <button class="btn" data-act="export" data-what="jobs">Jobs CSV</button>
-      <button class="btn" data-act="export" data-what="costs">Costs CSV</button>
-      <button class="btn" data-act="export" data-what="payments">Payments CSV</button>
-      <button class="btn" data-act="export" data-what="overheads">Overheads CSV</button>
-      <button class="btn" data-act="export" data-what="backup">Full backup (JSON)</button>
-    </div>
-  </section>`;
-  return layout({ title: 'Money', right: refreshBtn, body });
+`;
+  return layout({ title: 'Money', body });
 }
 
 // ======================================================================
@@ -2531,22 +2526,9 @@ function settingsView() {
   const s = set();
   const v = k => esc(s[k] ?? '');
   const body = `
+  <a class="card home-archive" href="#/quotes/settings">${ICON.doc}<span>Business &amp; bank details for quotes and invoices</span><span class="chev">›</span></a>
+  <section class="card" id="notif-card">${notifCardHtml()}</section>
   <form data-form="settings" class="form">
-    <section class="card">
-      <h3>Business details <span class="muted small">(on quotes &amp; invoices)</span></h3>
-      <label>Business name<input name="business_name" value="${v('business_name')}"></label>
-      <label>Tagline<input name="tagline" value="${v('tagline')}"></label>
-      <label>Phone<input name="phone" value="${v('phone')}" inputmode="tel"></label>
-      <label>Email<input name="email" value="${v('email')}" inputmode="email"></label>
-      <label>Website<input name="website" value="${v('website')}"></label>
-      <label>Area covered<input name="area" value="${v('area')}"></label>
-      <h4>Bank details <span class="muted small">(printed on invoices)</span></h4>
-      <label>Account name<input name="bank_name" value="${v('bank_name')}"></label>
-      <div class="two">
-        <label>Sort code<input name="bank_sort" value="${v('bank_sort')}" inputmode="numeric" placeholder="00-00-00"></label>
-        <label>Account number<input name="bank_acc" value="${v('bank_acc')}" inputmode="numeric"></label>
-      </div>
-    </section>
     <section class="card">
       <h3>VAT</h3>
       <label class="check"><input type="checkbox" name="vat_registered" ${s.vat_registered ? 'checked' : ''}> We're VAT registered</label>
@@ -2556,12 +2538,23 @@ function settingsView() {
       </div>
       <p class="muted small">Leave unticked until you register. When ticked, new jobs add VAT and quotes/invoices show it.</p>
     </section>
-    <button class="btn primary wide big">Save settings</button>
+    <button class="btn primary wide big">Save VAT settings</button>
   </form>
-  <section class="card" id="notif-card">${notifCardHtml()}</section>
+  <section class="card">
+    <h3>Download a copy</h3>
+    <p class="muted small">Everything is saved online automatically. These are just for your accountant or your own records.</p>
+    <div class="btn-row wrap">
+      <button class="btn" data-act="export" data-what="jobs">Jobs</button>
+      <button class="btn" data-act="export" data-what="costs">Costs</button>
+      <button class="btn" data-act="export" data-what="payments">Payments</button>
+      <button class="btn" data-act="export" data-what="overheads">Bills &amp; buys</button>
+      <button class="btn" data-act="export" data-what="backup">Everything</button>
+    </div>
+  </section>
   <section class="card">
     <p class="muted small">Signed in as ${S.meKnown ? `<b>${esc(nameOf(S.me))}</b> · ` : ''}${esc(S.session?.user?.email || '')}${S.live ? ' · <span class="live-dot"></span> live sync on' : ''}<br>App version ${APP_VERSION}</p>
     <div class="btn-row wrap">
+      <button class="btn" data-act="refresh">${ICON.refresh} Refresh now</button>
       ${DEMO ? '' : '<button class="btn" data-act="changePw">Change password</button>'}
       ${DEMO ? '<button class="btn" data-act="seed">Load sample jobs</button><button class="btn danger" data-act="resetDemo">Wipe demo data</button>' : '<button class="btn" data-act="signout">Sign out</button>'}
     </div>
@@ -2803,74 +2796,10 @@ function ohSheet(id, preset) {
 // ======================================================================
 // Quote / invoice document
 // ======================================================================
+// Old links (#/doc/<job>/quote) now open the Quotes tab
 function docView({ id, extra }) {
-  const j = jobById(id);
-  if (!j) return layout({ title: 'Not found', back: true, body: '<div class="empty">Job not found.</div>', nav: false });
-  const s = set();
-  const c = calc(j);
-  const isQuote = extra !== 'invoice';
-  const date = isQuote ? (j.quote_date || today()) : (j.finished_date || today());
-  const validTo = j.quote_valid_days ? addDays(date, num(j.quote_valid_days)) : '';
-  const ref = `${isQuote ? 'Q' : 'INV'}-${String(j.ref ?? 0).padStart(4, '0')}`;
-  const doc = `
-  <article class="doc">
-    <header class="doc-head">
-      <div>
-        <div class="doc-brand">
-          <img src="img/house-deep.png" alt="">
-          <div>
-            <div class="doc-logo">${/^C&B$/i.test(s.business_name.trim()) ? 'C<i>&amp;</i>B' : esc(s.business_name)}</div>
-            <div class="doc-name">Cunningham &amp; Baker</div>
-            <div class="doc-tag">${esc(s.tagline)}</div>
-          </div>
-        </div>
-      </div>
-      <div class="doc-contact">
-        ${s.phone ? `<div>${esc(s.phone)}</div>` : ''}${s.email ? `<div>${esc(s.email)}</div>` : ''}
-        ${s.website ? `<div>${esc(s.website)}</div>` : ''}${s.area ? `<div>${esc(s.area)}</div>` : ''}
-        ${s.vat_registered && s.vat_number ? `<div>VAT no. ${esc(s.vat_number)}</div>` : ''}
-      </div>
-    </header>
-    <div class="doc-title">
-      <h1>${isQuote ? 'Quotation' : 'Invoice'}</h1>
-      <table>
-        <tr><td>${isQuote ? 'Quote' : 'Invoice'} no.</td><td>${ref}</td></tr>
-        <tr><td>Date</td><td>${fmtDate(date)}</td></tr>
-        ${isQuote && validTo ? `<tr><td>Valid until</td><td>${fmtDate(validTo)}</td></tr>` : ''}
-      </table>
-    </div>
-    <div class="doc-to">
-      <div class="lbl">${isQuote ? 'Prepared for' : 'Bill to'}</div>
-      <div><b>${esc(j.customer_name || '')}</b></div>
-      ${j.address ? `<div>${nl2br(j.address)}</div>` : ''}${j.postcode ? `<div>${esc(j.postcode)}</div>` : ''}
-    </div>
-    <div class="doc-body">
-      <h2>${esc(j.title)}</h2>
-      ${j.description ? `<p>${nl2br(j.description)}</p>` : ''}
-    </div>
-    <table class="doc-totals">
-      ${j.vat_applies ? `
-        <tr><td>Price (ex VAT)</td><td>${money(c.price)}</td></tr>
-        <tr><td>VAT @ ${r2(num(j.vat_rate))}%</td><td>${money(c.vat)}</td></tr>` : ''}
-      <tr class="tot"><td>${isQuote ? 'Fixed price' : 'Total'}${j.vat_applies ? ' (inc VAT)' : ''}</td><td>${money(c.gross)}</td></tr>
-      ${!isQuote && c.pays.length ? c.pays.slice().sort((a, b) => String(a.pay_date).localeCompare(String(b.pay_date))).map(p => `<tr><td>Paid ${fmtDate(p.pay_date)} (${esc((PAY_KINDS[p.kind] || p.kind).toLowerCase()) })</td><td>−${money(p.amount)}</td></tr>`).join('') : ''}
-      ${!isQuote ? `<tr class="tot"><td>Balance due</td><td>${money(Math.max(0, c.balance))}</td></tr>` : ''}
-    </table>
-    ${!s.vat_registered && !j.vat_applies ? '<p class="doc-small">No VAT is charged.</p>' : ''}
-    ${!isQuote && (s.bank_acc || s.bank_sort) ? `<div class="doc-bank"><b>Pay by bank transfer</b><br>${esc(s.bank_name)}<br>Sort code ${esc(s.bank_sort)} · Account ${esc(s.bank_acc)}<br>Reference: ${ref}</div>` : ''}
-    <div class="doc-terms">${nl2br(isQuote ? s.quote_terms : s.invoice_terms)}</div>
-    <footer class="doc-foot">${esc(s.business_name)} · ${esc(s.phone)} · ${esc(s.email)}</footer>
-  </article>`;
-  return `
-  <div class="doc-bar">
-    <button class="btn small" data-act="back">${ICON.back} Back</button>
-    <a class="btn small" href="#/quotes/job-${isQuote ? 'invoice' : 'quote'}/${j.id}">${isQuote ? 'Invoice' : 'Quote'}</a>
-    <div class="grow"></div>
-    <button class="btn small" data-act="print" title="Print">Print</button>
-    <button class="btn small primary" data-act="sendPdf" data-id="${j.id}" data-type="${isQuote ? 'quote' : 'invoice'}">Send PDF</button>
-  </div>
-  <p class="doc-hint"><b>Send PDF</b> attaches this ${isQuote ? 'quote' : 'invoice'} to WhatsApp, email or text.</p>
-  ${doc}`;
+  setTimeout(() => go(`#/quotes/job-${extra === 'invoice' ? 'invoice' : 'quote'}/${id}`), 0);
+  return layout({ title: 'Quotes', body: '' });
 }
 
 // Make a real PDF file of the document (library loaded only when needed)
@@ -3920,48 +3849,6 @@ const ACT = {
   },
   toggleTodos() { S.showAllTodos = !S.showAllTodos; render(); },
   saveAgain(d, el) { const f = el.closest('form'); f.dataset.again = '1'; f.requestSubmit(); },
-  async sendPdf(d, el) {
-    const j = jobById(d.id);
-    const isQuote = d.type === 'quote';
-    if (isQuote && !j.quote_date && j.status === 'quoted') saveRow('jobs', j.id, { quote_date: today() }).catch(console.error);
-    const text = () => `${set().business_name} ${isQuote ? 'quote' : 'invoice'} ${isQuote ? 'Q' : 'INV'}-${String(j.ref ?? 0).padStart(4, '0')} — ${j.title}`;
-    // Second tap after Safari blocked the first share: share the ready-made file instantly
-    if (S.readyPdf && S.readyPdf.key === `${j.id}/${d.type}`) {
-      const file = S.readyPdf.file;
-      S.readyPdf = null;
-      el.textContent = 'Send PDF';
-      try { await navigator.share({ files: [file], title: file.name, text: text() }); await setMark(j, 'chased_at'); }
-      catch (e) { if (e.name !== 'AbortError') { saveFile(file); toast('PDF downloaded instead'); } }
-      return;
-    }
-    const ref = `${isQuote ? 'Q' : 'INV'}-${String(j.ref ?? 0).padStart(4, '0')}`;
-    const name = `${set().business_name.replace(/[^\w]+/g, '')} ${isQuote ? 'Quote' : 'Invoice'} ${ref}.pdf`;
-    const label = el.textContent;
-    el.textContent = 'Making PDF…';
-    await busy(el, async () => {
-      const file = await makePdf(name);
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file], title: name, text: text() });
-        } catch (e) {
-          if (e.name === 'AbortError') return;
-          if (e.name === 'NotAllowedError') {
-            // iPhone needs a fresh tap to open the share sheet
-            S.readyPdf = { key: `${j.id}/${d.type}`, file };
-            setTimeout(() => { el.textContent = 'PDF ready — tap to send'; el.classList.add('pulse'); }, 0);
-            return;
-          }
-          throw e;
-        }
-      } else {
-        saveFile(file);
-        try { await navigator.clipboard.writeText(text()); } catch { /* ignore */ }
-        toast('PDF downloaded — message copied, ready to paste');
-      }
-      await setMark(j, 'chased_at');
-    });
-    if (!S.readyPdf) el.textContent = label;
-  },
   async forgot(d, el) {
     const email = el.closest('form').email.value.trim();
     if (!email) { toast('Type your email first, then tap Forgot password', true); return; }

@@ -1150,3 +1150,8 @@ html[data-theme="dark"] .hero-profile { color: var(--gold); }
 html[data-theme="dark"] .home-actions a:first-child { background: var(--gold); border-color: var(--gold); color: #0c1a24; }
 html[data-theme="dark"] .home-actions a:first-child svg { color: #0c1a24; }
 html[data-theme="dark"] .home-actions svg { color: var(--gold); }
+.home-archive { display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin: 6px 0 14px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); color: var(--ink); text-decoration: none; font-weight: 600; }
+.home-archive svg { width: 22px; height: 22px; flex: none; color: var(--gold-deep); }
+.home-archive > span:not(.chev) { flex: 1; }
+.home-archive .chev { color: var(--muted); font-size: 1.2rem; }
+html[data-theme="dark"] .home-archive svg { color: var(--gold); }
