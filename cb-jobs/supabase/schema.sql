@@ -382,3 +382,23 @@ do $$ begin
     alter publication supabase_realtime add table public.contacts;
   end if;
 end $$;
+
+-- Batch 1 (21 Nov 2026): enquiries, where jobs came from, guarantees, service reminders, activity log
+alter table public.jobs drop constraint if exists jobs_status_check;
+alter table public.jobs add constraint jobs_status_check check (status in ('enquiry','quoted','active','finished','declined'));
+alter table public.jobs add column if not exists source text;
+alter table public.jobs add column if not exists guarantee_until date;
+alter table public.jobs add column if not exists guarantee_note text;
+alter table public.jobs add column if not exists callbacks jsonb not null default '[]'::jsonb;
+alter table public.jobs add column if not exists service_due date;
+create table if not exists public.activity (
+  id bigserial primary key, at timestamptz not null default now(), who text, op text not null, tbl text not null,
+  row_id uuid, job_id uuid, data jsonb, changes jsonb
+);
+create index if not exists activity_at_idx on public.activity (at desc);
+create index if not exists activity_job_idx on public.activity (job_id, at desc);
+alter table public.activity enable row level security;
+drop policy if exists "members read" on public.activity;
+create policy "members read" on public.activity for select to authenticated using (public.is_member());
+-- log_activity() trigger function: see migration batch1_enquiry_source_guarantee_service_activity
+-- (records insert/update/delete on jobs, costs, payments, overheads, events, tasks, docs, contacts, notes, photos)

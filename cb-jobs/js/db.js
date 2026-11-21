@@ -1,5 +1,5 @@
 // Data layer: Supabase when configured, otherwise a local demo store.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261121d';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261121e';
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 const TABLES = ['jobs', 'costs', 'payments', 'photos'];
@@ -79,6 +79,7 @@ const remote = {
       c.from('inbox_items').select('*').order('created_at', { ascending: false }).limit(200),
       c.from('docs').select('*').order('created_at', { ascending: false }).limit(500),
       c.from('contacts').select('*').order('name').limit(2000),
+      c.from('activity').select('*').order('at', { ascending: false }).limit(400),
     ]);
     TABLES.forEach((t, i) => { out[t] = check(results[i]); });
     const s = check(results[TABLES.length]);
@@ -116,6 +117,10 @@ const remote = {
     const ct = results[TABLES.length + 9];
     out.contacts = ct.error ? [] : ct.data;
     out.contactsMissing = !!ct.error;
+    // Who changed what
+    const ac = results[TABLES.length + 10];
+    out.activity = ac.error ? [] : ac.data;
+    out.activityMissing = !!ac.error;
     out.settingsMissing = !s.length;
     out.settings = s[0]?.data || {};
     return out;
@@ -235,7 +240,7 @@ const local = {
   async loadAll() {
     const s = readStore();
     const out = { settings: s.settings || {}, settingsMissing: false };
-    [...TABLES, 'overheads', 'events', 'tasks', 'notes', 'messages', 'inbox_items', 'docs', 'contacts'].forEach(t => { out[t] = structuredClone(s[t] || []); });
+    [...TABLES, 'overheads', 'events', 'tasks', 'notes', 'messages', 'inbox_items', 'docs', 'contacts', 'activity'].forEach(t => { out[t] = structuredClone(s[t] || []); });
     out.messages.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     out.members = [];
     return out;

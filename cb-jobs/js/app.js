@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121d';
-const VERSION_TAG = '20261121d';
+import { db, DEMO } from './db.js?v=20261121e';
+const VERSION_TAG = '20261121e';
 
-const APP_VERSION = '21 Nov 2026 (4)';
+const APP_VERSION = '21 Nov 2026 (5)';
 
 // ======================================================================
 // State & helpers
@@ -47,12 +47,16 @@ const toISO = d => `${d.getFullYear()}-${z2(d.getMonth() + 1)}-${z2(d.getDate())
 const today = () => toISO(new Date());
 const parseISO = s => new Date(`${s}T00:00:00`);
 const addDays = (iso, n) => { const d = parseISO(iso); d.setDate(d.getDate() + n); return toISO(d); };
+const addMonths = (iso, n) => { const d = parseISO(iso); const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); return toISO(d); };
 const fmtDate = (s, o) => (s ? parseISO(s.slice(0, 10)).toLocaleDateString('en-GB', o || { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const fmtShort = s => fmtDate(s, { day: 'numeric', month: 'short' });
 const nl2br = s => esc(s).replace(/\n/g, '<br>');
 
-const STATUS = { quoted: 'Quoted', active: 'Active', finished: 'Finished', declined: 'Declined' };
-const STATUS_ORDER = { active: 0, quoted: 1, finished: 2, declined: 3 };
+const STATUS = { enquiry: 'Enquiry', quoted: 'Quoted', active: 'Active', finished: 'Finished', declined: 'Declined' };
+const STATUS_ORDER = { active: 0, enquiry: 1, quoted: 2, finished: 3, declined: 4 };
+// Where a job came from (to see what's worth paying for)
+const SOURCES = { checkatrade: 'Checkatrade', referral: 'Word of mouth', repeat: 'Repeat customer', website: 'Website', social: 'Facebook / social', other: 'Other' };
+const isPre = j => j.status === 'enquiry' || j.status === 'quoted';
 const COST_CATS = {
   materials: 'Materials', hire: 'Plant / tool hire', sub: 'Subcontractor',
   waste: 'Skip / waste', travel: 'Fuel / travel', other: 'Other',
@@ -144,10 +148,34 @@ function ask(msg, okLabel = 'OK', danger = false) {
 
 function toast(msg, bad = false) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = `toast show${bad ? ' bad' : ''}`;
+  const undo = !bad && /deleted/i.test(msg) && S.undo && Date.now() - S.undo.at < 4000;
+  t.innerHTML = `${esc(msg)}${undo ? ' <button class="toast-undo" data-act="undoDelete">Undo</button>' : ''}`;
+  t.className = `toast show${bad ? ' bad' : ''}${undo ? ' has-undo' : ''}`;
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { t.className = 'toast'; }, 2600);
+  toast._t = setTimeout(() => { t.className = 'toast'; }, undo ? 10000 : 2600);
+}
+// Undo: anything just deleted can be put back for 10 seconds
+function rememberDeleted(items) {
+  S.undo = { items, at: Date.now() };
+}
+async function undoDelete() {
+  const u = S.undo;
+  if (!u || Date.now() - u.at > 15000) { toast('Too late to undo', true); return; }
+  S.undo = null;
+  S.lastWrite = Date.now();
+  clearTimeout(u.fileTimer);
+  for (const { table, row } of u.items) {
+    const clean = { ...row };
+    delete clean.ref; // job numbers are given out by the database
+    const r = await db.insert(table, clean);
+    (S.data[table] ||= []).push(r);
+  }
+  for (const { table, id, field, value } of u.relink || []) {
+    await db.update(table, id, { [field]: value }).catch(console.error);
+    const x = (S.data[table] || []).find(y => y.id === id); if (x) x[field] = value;
+  }
+  if (u.back) location.hash = u.back;
+  render(); toast('Put back');
 }
 
 function friendly(err) {
@@ -194,6 +222,11 @@ function todos() {
   const add = (j, pri, icon, text, sub, tpl, extra = '') => out.push({ j, pri, icon, text, sub, tpl, extra });
   for (const j of S.data.jobs) {
     const c = calc(j);
+    if (j.status === 'enquiry') {
+      const vis = visitOf(j);
+      if (!vis && daysSince(String(j.created_at || '').slice(0, 10)) >= 1) add(j, 3, '☎', 'Enquiry waiting', 'Ring them back or book a visit', null, j.customer_phone ? `<a class="btn small" href="tel:${esc(String(j.customer_phone).replace(/[^\d+]/g, ''))}">Call</a>` : '');
+      continue;
+    }
     if (j.status === 'quoted' && !j.quote_date) {
       const vis = visitOf(j);
       if (!vis || vis.event_date < t) add(j, 3, '✉', 'Quote to send', vis ? `Visited ${fmtShort(vis.event_date)} — price it up and send it` : 'Price it up, then Send PDF', null, `<a class="btn small" href="#/quotes/job-quote/${j.id}">Quote</a>`);
@@ -218,6 +251,12 @@ function todos() {
         else if (daysSince(chased) >= num(st.payment_chase_days)) add(j, 1, '£', 'Payment overdue', `${money(c.balance)} · finished ${daysSince(j.finished_date)} days ago`, 'payment', `<button class="btn small" data-act="paidFull" data-id="${j.id}">Paid</button>`);
       }
     }
+  }
+  // Services coming up (a month before) — ring and book them in
+  for (const j of S.data.jobs) {
+    if (!j.service_due || j.service_due > addDays(t, 31)) continue;
+    out.push({ j, pri: j.service_due <= t ? 2 : 4, icon: '🔧', text: j.service_due <= t ? 'Service overdue' : 'Service due soon', sub: `${esc(j.title || 'Service')} · due ${fmtShort(j.service_due)}${j.customer_phone ? ` · ${esc(j.customer_phone)}` : ''}`,
+      tpl: null, extra: `<button class="btn small primary" data-act="serviceBook" data-id="${j.id}">Book it</button><button class="btn small" data-act="serviceSkip" data-id="${j.id}">Not needed</button>` });
   }
   let lastBackup = null;
   try { lastBackup = localStorage.getItem('cb-last-backup'); } catch { /* ignore */ }
@@ -355,7 +394,7 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView, contacts: contactsView,
+    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView, contacts: contactsView, activity: activityView,
   };
   const typing = r.view === 'chat' && document.activeElement?.id === 'chat-input';
   const nearBottom = r.view !== 'chat' || (window.innerHeight + window.scrollY >= document.body.scrollHeight - 160);
@@ -1227,6 +1266,86 @@ function qSettingsView() {
   return layout({ title: 'Quote details', body });
 }
 
+
+// ======================================================================
+// Recent changes: who changed what (recorded by the database)
+// ======================================================================
+const ACT_TABLES = { jobs: 'job', costs: 'cost', payments: 'payment', overheads: 'bill / buy', events: 'calendar entry', tasks: 'to-do', docs: 'quote/invoice', contacts: 'contact', notes: 'note', photos: 'photo' };
+const ACT_FIELDS = { price: 'price', status: 'status', start_date: 'start', end_date: 'end', finished_date: 'finished', quote_date: 'quote sent', customer_name: 'customer', customer_phone: 'phone', customer_email: 'email',
+  address: 'address', postcode: 'postcode', title: 'job', description: 'scope of works', notes: 'notes', who: 'who', source: 'came from', guarantee_until: 'guarantee', service_due: 'service due',
+  amount: 'amount', unit_cost: 'cost', qty: 'qty', paid_by: 'paid by', received_by: 'paid to', pay_date: 'date', cost_date: 'date', event_date: 'date', start_time: 'time', done: 'done',
+  text: 'text', due_date: 'due', name: 'name', total: 'total', paid_in_full: 'paid in full', chased_at: 'chased', callbacks: 'call-backs', frequency: 'how often', category: 'type' };
+function actWho(a) {
+  if (!a.who || a.who === 'claude') return 'Claude';
+  const m = (S.data.members || []).find(x => String(x.email).toLowerCase() === String(a.who).toLowerCase());
+  if (m?.who) return nameOf(m.who);
+  const n = String(a.who).split('@')[0].replace(/[._\d]+/g, ' ').trim();
+  return n ? n[0].toUpperCase() + n.slice(1) : 'Someone';
+}
+function actVal(k, v) {
+  if (v == null || v === '') return '—';
+  if (k === 'status') return STATUS[v] || v;
+  if (k === 'source') return SOURCES[v] || v;
+  if (['price', 'amount', 'unit_cost', 'total'].includes(k)) return money(v);
+  if (['who', 'paid_by', 'received_by'].includes(k)) return v === 'both' ? 'Both' : v === 'split' ? 'Split' : nameOf(v);
+  if (/_date$|_until$|_due$|chased_at/.test(k)) return fmtShort(String(v).slice(0, 10));
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (Array.isArray(v)) return `${v.length}`;
+  if (typeof v === 'object') return '…';
+  const t = String(v).replace(/\s+/g, ' ');
+  return t.length > 40 ? `${t.slice(0, 38)}…` : t;
+}
+function actThing(a) {
+  const d = a.data || {};
+  switch (a.tbl) {
+    case 'jobs': return jobById(a.row_id) ? jobName(jobById(a.row_id)) : (String(d.address || '').split('\n')[0] || d.title || 'a job');
+    case 'costs': return `${d.description || 'cost'}${d.unit_cost != null ? ` ${money(num(d.qty || 1) * num(d.unit_cost))}` : ''}`;
+    case 'payments': return d.amount != null ? money(d.amount) : 'payment';
+    case 'overheads': return `${d.name || ''}${d.amount != null ? ` ${money(d.amount)}` : ''}`;
+    case 'events': return `${d.title || 'entry'}${d.event_date ? ` ${fmtShort(d.event_date)}` : ''}`;
+    case 'tasks': case 'notes': return actVal('text', d.text);
+    case 'docs': return `${d.doc_type === 'invoice' ? 'invoice' : 'quote'} *${d.number ?? ''}${d.customer?.name ? ` (${d.customer.name})` : ''}`;
+    case 'contacts': return d.name || 'contact';
+    default: return '';
+  }
+}
+function actLine(a, withJob = true) {
+  const what = ACT_TABLES[a.tbl] || a.tbl;
+  const j = a.tbl !== 'jobs' && a.job_id ? jobById(a.job_id) : null;
+  let text;
+  if (a.op === 'insert') text = `added ${a.tbl === 'jobs' ? ({ enquiry: 'an enquiry', quoted: 'a quote' }[a.data?.status] || 'a job') : `a ${what}`}: <b>${esc(actThing(a))}</b>`;
+  else if (a.op === 'delete') text = `deleted a ${what}: <b>${esc(actThing(a))}</b>`;
+  else {
+    const ch = Object.entries(a.changes || {});
+    const parts = ch.slice(0, 3).map(([k, [o, n]]) => k === 'callbacks' ? 'logged a call-back' : k === 'done' && n === true ? 'ticked it off' : `${ACT_FIELDS[k] || k.replace(/_/g, ' ')} ${esc(actVal(k, o))} → <b>${esc(actVal(k, n))}</b>`);
+    text = `changed ${a.tbl === 'jobs' ? '' : `a ${what} `}<b>${esc(actThing(a))}</b>: ${parts.join(', ')}${ch.length > 3 ? ` and ${ch.length - 3} more` : ''}`;
+  }
+  return `<span class="act-who">${esc(actWho(a))}</span> ${text}${withJob && j ? ` <a class="muted" href="#/job/${j.id}">· ${esc(jobName(j))}</a>` : ''}`;
+}
+function activityView() {
+  const f = S.actF || 'all';
+  const list = (S.data.activity || []).filter(a => f === 'all' || actWho(a) === f).slice(0, 300);
+  const people = [...new Set((S.data.activity || []).map(actWho))];
+  let day = '';
+  const rows = list.map(a => {
+    const d = String(a.at).slice(0, 10);
+    const head = d !== day ? `<div class="act-day">${d === today() ? 'Today' : d === addDays(today(), -1) ? 'Yesterday' : fmtDate(d)}</div>` : '';
+    day = d;
+    return `${head}<div class="act-row"><span class="act-time">${new Date(a.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span><span>${actLine(a)}</span></div>`;
+  }).join('');
+  const body = `
+  <p class="muted small">Every change either of you (or Claude) makes is listed here.</p>
+  <div class="chips">${['all', ...people].map(p => `<button class="chip ${f === p ? 'on' : ''}" data-act="actFilter" data-f="${esc(p)}">${p === 'all' ? 'Everyone' : esc(p)}</button>`).join('')}</div>
+  <section class="card act-list">${rows || `<p class="muted small">${S.data.activityMissing ? 'Not set up yet.' : DEMO ? 'Recent changes show here on your real account.' : 'Nothing yet.'}</p>`}</section>`;
+  return layout({ title: 'Recent changes', back: true, body });
+}
+function jobHistoryHtml(j) {
+  const list = (S.data.activity || []).filter(a => a.job_id === j.id || (a.tbl === 'jobs' && a.row_id === j.id));
+  if (!list.length) return '';
+  return `<details class="card act-job"><summary><b>History</b> <span class="muted small">${list.length} change${list.length > 1 ? 's' : ''}</span></summary>
+    ${list.slice(0, 25).map(a => `<div class="act-row"><span class="act-time">${fmtShort(String(a.at).slice(0, 10))}</span><span>${actLine(a, false)}</span></div>`).join('')}</details>`;
+}
+
 // ======================================================================
 // Contacts: every customer from the jobs, plus suppliers, trades and others you add
 // ======================================================================
@@ -1475,6 +1594,7 @@ function homeGroupsHtml() {
   const onNow = jobs.filter(running).sort(byStart);
   const booked = jobs.filter(j => j.status === 'active' && !running(j)).sort(byStart);
   const quotes = jobs.filter(j => j.status === 'quoted').sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const enquiries = jobs.filter(j => j.status === 'enquiry').sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   const owed = jobs.filter(j => j.status === 'finished' && calc(j).balance > 0.004).sort((a, b) => String(a.finished_date || '').localeCompare(String(b.finished_date || '')));
   const group = (key, title, list, extra = '', hint = '') => {
     if (!list.length) return '';
@@ -1486,6 +1606,7 @@ function homeGroupsHtml() {
     </section>`;
   };
   const out = [
+    group('enq', 'New enquiries', enquiries, '', 'Ring them back or book a visit, then make a quote.'),
     group('now', 'On now', onNow),
     group('booked', 'Booked in', booked, '', booked.some(j => !j.start_date) ? 'Jobs without a date are at the bottom — tap one to set a date.' : ''),
     group('quotes', 'Quotes waiting for an answer', quotes, quotes.length ? money0(sum(quotes.map(j => calc(j).gross))) : ''),
@@ -1493,7 +1614,8 @@ function homeGroupsHtml() {
   ].join('');
   const fin = jobs.filter(j => j.status === 'finished' || j.status === 'declined').length;
   return (out || '<div class="empty">Nothing on at the moment. Tap <b>New job or quote</b> to add one.</div>')
-    + (fin ? `<a class="home-archive" href="#/archive">${ICON.archive}<span>Finished jobs <span class="muted">(${fin})</span></span><span class="chev">›</span></a>` : '');
+    + (fin ? `<a class="home-archive" href="#/archive">${ICON.archive}<span>Finished jobs <span class="muted">(${fin})</span></span><span class="chev">›</span></a>` : '')
+    + (S.data.activityMissing ? '' : `<a class="home-archive" href="#/activity">${ICON.refresh}<span>Recent changes${(() => { const n = (S.data.activity || []).filter(a => a.who && a.who !== myEmail() && Date.now() - Date.parse(a.at) < 86400000).length; return n ? ` <span class="muted">(${n} today by ${S.meKnown ? esc(nameOf(otherOf(S.me))) : 'others'})</span>` : ''; })()}</span><span class="chev">›</span></a>`);
 }
 
 // Due-date label for a to-do: overdue / today / tomorrow / date
@@ -1666,7 +1788,7 @@ function jobListHtml() {
   let list = S.data.jobs.slice();
   const f = String(S.search || '').trim() ? 'any' : S.filter;
   if (f === 'any') { /* searching: every job, finished ones too */ }
-  else if (f === 'all') list = list.filter(j => j.status === 'quoted' || j.status === 'active');
+  else if (f === 'all') list = list.filter(j => isPre(j) || j.status === 'active');
   else if (f === 'owed') list = list.filter(j => j.status === 'finished' && calc(j).balance > 0.004);
   else list = list.filter(j => j.status === f);
   list = list.filter(j => matches(j, S.search));
@@ -1691,7 +1813,11 @@ function jobCard(j) {
   const c = calc(j);
   const dates = j.start_date ? `${fmtShort(j.start_date)}${j.end_date && j.end_date !== j.start_date ? ` – ${fmtShort(j.end_date)}` : ''}` : '';
   let line = '';
-  if (j.status === 'quoted') {
+  if (j.status === 'enquiry') {
+    const vis = visitOf(j);
+    line = vis && vis.event_date >= today() ? `<b>Visit ${fmtShort(vis.event_date)}${vis.start_time ? ` ${fmtTime(vis.start_time)}` : ''}</b> · to price up`
+      : `<b>New enquiry</b> · ${fmtShort(String(j.created_at || today()).slice(0, 10))}${j.source ? ` · ${esc(SOURCES[j.source] || '')}` : ''}`;
+  } else if (j.status === 'quoted') {
     const vis = visitOf(j);
     line = j.quote_date ? `<b>${money0(c.gross)}</b> quote · sent ${fmtShort(j.quote_date)}`
       : vis && vis.event_date >= today() ? `<b>Visit ${fmtShort(vis.event_date)}${vis.start_time ? ` ${fmtTime(vis.start_time)}` : ''}</b> · to price up`
@@ -1724,7 +1850,7 @@ function jobView({ id }) {
         return cp ? `<a class="hero-profile" href="#/contacts/${encodeURIComponent(cp.key)}">${ICON.people} ${esc(cp.name)}'s profile${cp.jobs.length > 1 ? ` · ${cp.jobs.length} jobs` : ''} ›</a>` : ''; })()}
       <div class="quick">
         ${phone ? `<a href="tel:${esc(phone)}">${ICON.phone}<span>Call</span></a>` : '<span class="off">' + ICON.phone + '<span>Call</span></span>'}
-        <a href="#/quotes/job-${j.status === 'quoted' || j.status === 'declined' ? 'quote' : 'invoice'}/${j.id}">${ICON.doc}<span>${j.status === 'quoted' || j.status === 'declined' ? 'Quote' : 'Invoice'}</span></a>
+        <a href="#/quotes/job-${isPre(j) || j.status === 'declined' ? 'quote' : 'invoice'}/${j.id}">${ICON.doc}<span>${isPre(j) || j.status === 'declined' ? 'Quote' : 'Invoice'}</span></a>
         ${addr ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener">${ICON.pin}<span>Directions</span></a>` : '<span class="off">' + ICON.pin + '<span>Directions</span></span>'}
       </div>
     </section>
@@ -1735,13 +1861,37 @@ function jobView({ id }) {
   });
 }
 
+
+// ----- Aftercare: guarantee, call-backs, service reminder -----
+const jobBaseDate = j => j.finished_date || j.end_date || j.start_date || today();
+function aftercareHtml(j) {
+  if (j.status !== 'active' && j.status !== 'finished') return '';
+  const t = today();
+  const cbs = Array.isArray(j.callbacks) ? j.callbacks : [];
+  const g = j.guarantee_until;
+  const gLine = g ? (g >= t ? `<b class="ok">Guaranteed until ${fmtDate(g)}</b>` : `<b class="muted">Guarantee ended ${fmtDate(g)}</b>`) : '<span class="muted">No guarantee recorded</span>';
+  const sv = j.service_due;
+  return `<section class="card aftercare">
+    <h3>Aftercare</h3>
+    <div class="ac-row"><span class="ac-ico">🛡</span><div class="ac-main">${gLine}${j.guarantee_note ? `<div class="muted small">${esc(j.guarantee_note)}</div>` : ''}</div>
+      <button class="btn small" data-act="guaranteeSheet" data-id="${j.id}">${g ? 'Change' : 'Add'}</button></div>
+    <div class="ac-row"><span class="ac-ico">🔧</span><div class="ac-main">${sv ? `<b>Service due ${fmtDate(sv)}</b><div class="muted small">You'll get a to-do a month before</div>` : '<span class="muted">No service reminder</span>'}</div>
+      <button class="btn small" data-act="serviceSheet" data-id="${j.id}">${sv ? 'Change' : 'Remind us'}</button></div>
+    <div class="ac-row"><span class="ac-ico">↩</span><div class="ac-main">${cbs.length ? `<b>${cbs.length} call-back${cbs.length > 1 ? 's' : ''}</b>` : '<span class="muted">No call-backs</span>'}</div>
+      <button class="btn small" data-act="callbackSheet" data-id="${j.id}">Log one</button></div>
+    ${cbs.length ? `<ul class="ac-cbs">${cbs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(x => `<li><b>${fmtShort(x.date)}</b> ${x.who ? `<span class="muted">${esc(nameOf(x.who))}</span> ` : ''}— ${esc(x.note || '')}</li>`).join('')}</ul>` : ''}
+  </section>`;
+}
+const periodBtns = (base, opts) => `<div class="chips wrap">${opts.map(([m, l]) => `<button type="button" class="chip" data-act="pickPeriod" data-d="${addMonths(base, m)}">${l}</button>`).join('')}</div>`;
+
 function statusActions(j) {
   const b = (s, label, cls = '') => `<button class="btn ${cls}" data-act="status" data-id="${j.id}" data-s="${s}">${label}</button>`;
-  const steps = ['quoted', 'active', 'finished'];
+  const steps = ['enquiry', 'quoted', 'active', 'finished'];
   const idx = steps.indexOf(j.status);
   const stepper = `<div class="stepper">${steps.map((s, i) => `<div class="step ${i <= idx ? 'done' : ''} ${i === idx ? 'cur' : ''}"><span></span>${STATUS[s]}</div>`).join('')}</div>`;
   let btns = '';
-  if (j.status === 'quoted') btns = b('active', 'Won it — mark Active', 'primary') + b('declined', 'Lost');
+  if (j.status === 'enquiry') btns = `<a class="btn primary" href="#/quotes/job-quote/${j.id}">Price it — make a quote</a>` + b('active', 'Straight to job') + b('declined', 'Not going ahead');
+  else if (j.status === 'quoted') btns = b('active', 'Won it — mark Active', 'primary') + b('declined', 'Lost');
   else if (j.status === 'active') btns = b('finished', 'Mark Finished', 'primary');
   else if (j.status === 'finished') btns = b('active', 'Reopen');
   else btns = b('quoted', 'Reopen as quote');
@@ -1783,6 +1933,7 @@ function overviewTab(j, c) {
     ${j.customer_phone ? `<div class="kv"><span>Phone</span><b>${esc(j.customer_phone)}</b></div>` : ''}
     ${j.customer_email ? `<div class="kv"><span>Email</span><b>${esc(j.customer_email)}</b></div>` : ''}
     ${j.status === 'quoted' && visitOf(j) ? `<div class="kv"><span>Quote visit</span><b>${fmtDate(visitOf(j).event_date)}${visitOf(j).start_time ? ` · ${fmtTime(visitOf(j).start_time)}` : ''}</b></div>` : ''}
+    <div class="kv"><span>Came from</span><b>${j.source ? esc(SOURCES[j.source] || j.source) : `<a href="#/edit/${j.id}" class="muted">not set — add</a>`}</b></div>
     ${jobWhoLabel(j) ? `<div class="kv"><span>Who did it</span><b>${esc(jobWhoLabel(j))} · 100% to them</b></div>` : ''}
     <div class="kv"><span>Quote #${j.ref ?? ''}</span><b>${j.quote_date ? `sent ${fmtDate(j.quote_date)}` : j.status === 'quoted' ? '<span class="muted">not sent yet</span>' : '—'}</b></div>
     ${j.finished_date ? `<div class="kv"><span>Finished</span><b>${fmtDate(j.finished_date)}</b></div>` : ''}
@@ -1791,9 +1942,11 @@ function overviewTab(j, c) {
     ${others.length ? `<h4>Other jobs for ${esc(j.customer_name)}</h4>${others.map(o => `<a class="kv link" href="#/job/${o.id}"><span>${esc(jobName(o))}${jobAddr(o) ? ` <em class="muted">${esc(o.title || '')}</em>` : ''}</span><b>${pill(o.status)}</b></a>`).join('')}` : ''}
   </section>
 
+  ${aftercareHtml(j)}
+  ${jobHistoryHtml(j)}
   ${jobDocsHtml(j)}
   <div class="action-grid">
-    ${j.status === 'quoted' || j.status === 'declined' ? `<a class="btn" href="#/quotes/job-invoice/${j.id}">${ICON.doc} Invoice</a>` : `<a class="btn" href="#/quotes/job-quote/${j.id}">${ICON.doc} Quote</a>`}
+    ${isPre(j) || j.status === 'declined' ? `<a class="btn" href="#/quotes/job-invoice/${j.id}">${ICON.doc} Invoice</a>` : `<a class="btn" href="#/quotes/job-quote/${j.id}">${ICON.doc} Quote</a>`}
     ${S.data.eventsMissing ? '' : `<button class="btn" data-act="evSheet" data-job="${j.id}">+ Calendar</button>`}
     <button class="btn" data-act="duplicate" data-id="${j.id}">Duplicate</button>
     ${S.data.messagesMissing ? '' : `<button class="btn" data-act="msgSheet" data-job="${j.id}">${ICON.chat} Message ${esc(nameOf(otherOf(S.me)))}</button>`}
@@ -1856,7 +2009,7 @@ function photosTab(j) {
   const ph = photosOf(j.id).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const groups = {};
   ph.forEach(p => { (groups[p.kind || 'other'] ||= []).push(p); });
-  const kind = S.photoKind?.[j.id] || (j.status === 'quoted' ? 'before' : j.status === 'finished' ? 'after' : 'during');
+  const kind = S.photoKind?.[j.id] || (isPre(j) ? 'before' : j.status === 'finished' ? 'after' : 'during');
   const many = Object.keys(groups).length > 1;
   return `
   <section class="card sec" id="j-photos">
@@ -1882,7 +2035,7 @@ function photosTab(j) {
 
 // Upload photos straight after they're picked
 async function uploadPhotos(jobId, files, input) {
-  const kind = S.photoKind?.[jobId] || (() => { const j = jobById(jobId); return j.status === 'quoted' ? 'before' : j.status === 'finished' ? 'after' : 'during'; })();
+  const kind = S.photoKind?.[jobId] || (() => { const j = jobById(jobId); return isPre(j) ? 'before' : j.status === 'finished' ? 'after' : 'during'; })();
   const status = document.getElementById('ph-status');
   const btns = document.querySelectorAll('.ph-btn');
   btns.forEach(b => b.classList.add('busy'));
@@ -2015,6 +2168,10 @@ function noteSheet(id) {
 function newChoiceView() {
   const body = `
   <p class="muted choose-lead">What are you adding?</p>
+  <a class="card choose" href="#/edit/new-enquiry">
+    <span class="choose-icon">${ICON.phone}</span>
+    <span><strong>An enquiry</strong><em>Someone's been in touch — not priced yet</em></span>
+  </a>
   <a class="card choose" href="#/edit/new-quote">
     <span class="choose-icon">${ICON.doc}</span>
     <span><strong>A quote</strong><em>Need to price it up first — maybe visit to have a look</em></span>
@@ -2028,14 +2185,15 @@ function newChoiceView() {
 
 function editView({ id }) {
   if (id === 'new') return newChoiceView();
-  const isNew = id === 'new-quote' || id === 'new-job';
+  const isNew = id === 'new-quote' || id === 'new-job' || id === 'new-enquiry';
   const st = set();
   const j = isNew
-    ? { status: id === 'new-job' ? 'active' : 'quoted', price: '', vat_applies: !!st.vat_registered, vat_rate: st.vat_rate, quote_date: null, quote_valid_days: st.quote_valid_days, ...takeDraft() }
+    ? { status: id === 'new-job' ? 'active' : id === 'new-enquiry' ? 'enquiry' : 'quoted', price: '', vat_applies: !!st.vat_registered, vat_rate: st.vat_rate, quote_date: null, quote_valid_days: st.quote_valid_days, ...takeDraft() }
     : jobById(id);
   if (!j) return layout({ title: 'Not found', back: true, body: '<div class="empty">Job not found.</div>' });
   const v = k => esc(j[k] ?? '');
-  const quote = j.status === 'quoted';
+  const enq = j.status === 'enquiry';
+  const quote = j.status === 'quoted' || enq;
   const vis = !isNew && quote ? visitOf(j) : null;
   const visitCard = `
     <section class="card">
@@ -2061,7 +2219,7 @@ function editView({ id }) {
   const body = `
   <form data-form="job" class="form">
     <input type="hidden" name="id" value="${isNew ? '' : esc(j.id)}">
-    ${isNew ? `<div class="new-kind ${quote ? 'quoted' : 'active'}">${quote ? 'New quote' : 'New job'} <a href="#/edit/${quote ? 'new-job' : 'new-quote'}" data-act="swapKind">Change to ${quote ? 'job' : 'quote'}</a></div>` : ''}
+    ${isNew ? `<div class="new-kind ${enq ? 'enquiry' : quote ? 'quoted' : 'active'}">${enq ? 'New enquiry' : quote ? 'New quote' : 'New job'} <a href="#/edit/${quote ? 'new-job' : 'new-quote'}" data-act="swapKind">Change to ${quote ? 'job' : 'quote'}</a></div>` : ''}
     <section class="card">
       <h3>${quote ? 'What and where' : 'Job'}</h3>
       <label>Job address <span class="muted small">(this is the job's name)</span><textarea name="address" rows="2" autocapitalize="words" placeholder="e.g. 14 Sea Road, Bexhill-on-Sea">${v('address')}</textarea></label>
@@ -2082,6 +2240,8 @@ function editView({ id }) {
         <label>Phone<input name="customer_phone" type="tel" value="${v('customer_phone')}"></label>
         <label>Email<input name="customer_email" type="email" value="${v('customer_email')}"></label>
       </div>
+      <div class="field-label">Where did they find us?</div>
+      <div class="chips wrap src-pick">${Object.entries(SOURCES).map(([k, l]) => `<label class="chip ${j.source === k ? 'on' : ''}"><input type="radio" name="source" value="${k}" ${j.source === k ? 'checked' : ''} data-input="srcpick">${l}</label>`).join('')}</div>
     </section>
     ${quote ? visitCard : ''}
     <section class="card">
@@ -2104,9 +2264,9 @@ function editView({ id }) {
       <label>Scope of works <span class="muted small">(shown on quote & invoice)</span><textarea name="description" rows="5">${v('description')}</textarea></label>
       <label>Internal notes <span class="muted small">(only you two see these)</span><textarea name="notes" rows="3">${v('notes')}</textarea></label>
     </section>
-    <button class="btn primary wide big">${isNew ? (quote ? 'Save quote' : 'Create job') : 'Save changes'}</button>
+    <button class="btn primary wide big">${isNew ? (enq ? 'Save enquiry' : quote ? 'Save quote' : 'Create job') : 'Save changes'}</button>
   </form>`;
-  return layout({ title: isNew ? (quote ? 'New quote' : 'New job') : 'Edit', back: true, body, nav: false });
+  return layout({ title: isNew ? (enq ? 'New enquiry' : quote ? 'New quote' : 'New job') : 'Edit', back: true, body, nav: false });
 }
 
 // ======================================================================
@@ -2310,7 +2470,7 @@ function evSheet(id, date, jobId) {
     : { kind: 'visit', who: S.me, event_date: date || today(), job_id: jobId || null, done: false };
   if (!x) return;
   const v = k => esc(x[k] ?? '');
-  const jobs = S.data.jobs.filter(j => j.status === 'quoted' || j.status === 'active' || j.id === x.job_id)
+  const jobs = S.data.jobs.filter(j => isPre(j) || j.status === 'active' || j.id === x.job_id)
     .sort((a, b) => jobName(a).localeCompare(jobName(b)));
   openSheet(`<form data-form="event" class="form">
     ${sheetHead(id ? 'Edit entry' : 'Add to calendar', id, 'events')}
@@ -2341,7 +2501,7 @@ function archiveView() {
   const body = `
   <div class="toolbar"><input type="search" placeholder="Search archive…" value="${esc(S.archiveSearch)}" data-input="archiveSearch"></div>
   <div class="chips">
-    ${['all', ...years, 'declined'].map(y => `<button class="chip ${S.archiveYear === y ? 'on' : ''}" data-act="archiveYear" data-y="${y}">${y === 'all' ? 'All finished' : y === 'declined' ? 'Declined' : y}</button>`).join('')}
+    ${['all', 'guarantee', 'service', ...years, 'declined'].map(y => `<button class="chip ${S.archiveYear === y ? 'on' : ''}" data-act="archiveYear" data-y="${y}">${{ all: 'All finished', declined: 'Declined', guarantee: 'Under guarantee', service: 'Service reminders' }[y] || y}</button>`).join('')}
   </div>
   <div id="archive-list">${archiveListHtml()}</div>`;
   return layout({ title: 'Finished jobs', back: true, body });
@@ -2349,7 +2509,14 @@ function archiveView() {
 
 function archiveListHtml() {
   const y = S.archiveYear;
-  let list = S.data.jobs.filter(j => (y === 'declined' ? j.status === 'declined' : j.status === 'finished'));
+  let list = S.data.jobs.filter(j => (y === 'declined' ? j.status === 'declined' : y === 'guarantee' ? j.guarantee_until && j.guarantee_until >= today() : y === 'service' ? !!j.service_due : j.status === 'finished'));
+  if (y === 'guarantee') list.sort((a, b) => String(a.guarantee_until).localeCompare(String(b.guarantee_until)));
+  if (y === 'service') list.sort((a, b) => String(a.service_due).localeCompare(String(b.service_due)));
+  if (y === 'guarantee' || y === 'service') {
+    list = list.filter(j => matches(j, S.archiveSearch));
+    return list.length ? list.map(j => `${jobCard(j)}`.replace('</a>', `<div class="muted small arch-extra">${y === 'guarantee' ? `🛡 Guaranteed until ${fmtDate(j.guarantee_until)}${j.guarantee_note ? ` — ${esc(j.guarantee_note)}` : ''}` : `🔧 Service due ${fmtDate(j.service_due)}`}</div></a>`)).join('')
+      : `<div class="empty">${y === 'guarantee' ? 'No jobs under guarantee. Add one from a job\u2019s Aftercare section.' : 'No service reminders set. Add one from a job\u2019s Aftercare section.'}</div>`;
+  }
   if (y !== 'all' && y !== 'declined') list = list.filter(j => (j.finished_date || j.updated_at || '').startsWith(y));
   list = list.filter(j => matches(j, S.archiveSearch));
   list.sort((a, b) => String(b.finished_date || b.updated_at || '').localeCompare(String(a.finished_date || a.updated_at || '')));
@@ -2371,6 +2538,37 @@ function archiveListHtml() {
 // ======================================================================
 // Money / reports
 // ======================================================================
+
+// Where work comes from: enquiries, wins, work and profit per source (for the tax year)
+function sourcesCardHtml(ty, cur) {
+  const inTy = iso => iso && taxYearOf(String(iso).slice(0, 10)) === ty;
+  const jobs = S.data.jobs.filter(j => inTy(j.created_at) || inTy(j.finished_date));
+  if (!jobs.length) return '';
+  const keys = [...Object.keys(SOURCES), ''];
+  const rows = keys.map(k => {
+    const js = jobs.filter(j => (j.source || '') === k);
+    if (!js.length) return null;
+    const won = js.filter(j => j.status === 'active' || j.status === 'finished');
+    const lost = js.filter(j => j.status === 'declined');
+    const fin = js.filter(j => j.status === 'finished' && inTy(j.finished_date));
+    return { k, label: k ? SOURCES[k] : 'Not set', leads: js.length, won: won.length, lost: lost.length, work: sum(won.map(j => calc(j).gross)), profit: sum(fin.map(j => calc(j).profit)) };
+  }).filter(Boolean).sort((a, b) => b.work - a.work);
+  const end = ty === cur ? today() : tyEnd(ty);
+  const cta = (S.data.overheads || []).filter(o => /checkatrade/i.test(o.name || ''));
+  const ctaCost = sum(cta.map(o => ohInRange(o, tyStart(ty), end)));
+  const ct = rows.find(r => r.k === 'checkatrade');
+  const unset = rows.find(r => !r.k);
+  return `<section class="card sources">
+    <h3>Where your work comes from</h3>
+    <table class="src-table"><thead><tr><th></th><th>Jobs</th><th>Won</th><th>Work</th><th>Profit</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${esc(r.label)}</td><td>${r.leads}</td><td>${r.won}${r.won + r.lost ? `<em> ${Math.round((r.won / Math.max(1, r.won + r.lost)) * 100)}%</em>` : ''}</td><td>${money0(r.work)}</td><td class="${r.profit < 0 ? 'neg' : ''}">${money0(r.profit)}</td></tr>`).join('')}
+    </tbody></table>
+    ${ctaCost ? `<div class="src-cta ${ct && ct.profit >= ctaCost ? 'ok' : 'warn'}"><b>Checkatrade:</b> cost ${money0(ctaCost)} this tax year${ct ? ` · profit from its jobs ${money0(ct.profit)} → <b>${ct.profit >= ctaCost ? `paying for itself (+${money0(ct.profit - ctaCost)})` : `${money0(ctaCost - ct.profit)} short so far`}</b>` : ' · no jobs marked as Checkatrade yet'}</div>` : ''}
+    ${unset ? `<p class="muted small">${unset.leads} job${unset.leads > 1 ? 's don’t' : ' doesn’t'} say where ${unset.leads > 1 ? 'they' : 'it'} came from yet — set it with <b>Edit</b> on the job for better figures.</p>` : ''}
+    <p class="muted small">Profit counts finished jobs only. "Won" % is out of the quotes that got an answer.</p>
+  </section>`;
+}
+
 function moneyView() {
   const jobs = S.data.jobs;
   const cur = taxYearOf(today());
@@ -2432,6 +2630,8 @@ function moneyView() {
     <h3>Waiting on payment</h3>
     ${owed.length ? owed.map(j => { const c = calc(j); return `<a class="kv link" href="#/job/${j.id}"><span>${esc(jobName(j))} <em class="muted">${esc(jobSub(j))}</em></span><b class="neg">${money(c.balance)}</b></a>`; }).join('') : '<p class="muted small">Nobody owes you anything.</p>'}
   </section>
+
+  ${sourcesCardHtml(ty, cur)}
 
   <h2 class="section-title" id="overheads">Overheads</h2>
   ${overheadsBody()}
@@ -3017,12 +3217,14 @@ async function saveRow(table, id, row) {
 }
 async function deleteRow(table, id) {
   S.lastWrite = Date.now();
-  if (table === 'photos') {
-    const p = S.data.photos.find(x => x.id === id);
-    if (p) await db.removeFiles([p.path]).catch(console.error);
-  }
+  const row = (S.data[table] || []).find(x => x.id === id);
   await db.remove(table, id);
   S.data[table] = S.data[table].filter(x => x.id !== id);
+  if (row) {
+    rememberDeleted([{ table, row }]);
+    // photo files are only removed once the chance to undo has passed
+    if (table === 'photos') S.undo.fileTimer = setTimeout(() => db.removeFiles([row.path]).catch(console.error), 15000);
+  }
 }
 
 // Last-loaded jobs are kept on the phone so they can still be viewed with no signal
@@ -3059,6 +3261,20 @@ function getPayer() { try { const v = localStorage.getItem('cb-payer'); return v
 function setPayer(p) { if (p !== 'a' && p !== 'b') return; S.payer = p; try { localStorage.setItem('cb-payer', p); } catch { /* ignore */ } }
 
 const FORMS = {
+  async guarantee(fd) {
+    await saveRow('jobs', fd.get('id'), { guarantee_until: fd.get('until') || null, guarantee_note: String(fd.get('note') || '').trim() || null });
+    closeSheet(); render(); toast('Guarantee saved');
+  },
+  async service(fd) {
+    await saveRow('jobs', fd.get('id'), { service_due: fd.get('due') || null });
+    closeSheet(); render(); toast(fd.get('due') ? 'Service reminder set' : 'Saved');
+  },
+  async callback(fd) {
+    const j = jobById(fd.get('id')); if (!j) return;
+    const list = [...(Array.isArray(j.callbacks) ? j.callbacks : []), { date: fd.get('date') || today(), note: String(fd.get('note') || '').trim(), who: S.meKnown ? S.me : null, at: new Date().toISOString() }];
+    await saveRow('jobs', j.id, { callbacks: list });
+    closeSheet(); render(); toast('Call-back logged');
+  },
   async contact(fd, form) {
     await busy(form.querySelector('button.primary'), async () => {
       const id = fd.get('id') || null;
@@ -3193,6 +3409,7 @@ const FORMS = {
         start_date: nz(fd.get('start_date')),
         end_date: nz(fd.get('end_date')),
         who: fd.get('who') || 'both',
+        source: fd.get('source') || (old?.source ?? null),
       };
       // Quote visit -> calendar entry linked to the job
       const syncVisit = async jobId => {
@@ -3211,7 +3428,7 @@ const FORMS = {
         row.created_by = S.session?.user?.email || null;
         const saved = await saveRow('jobs', null, row);
         await syncVisit(saved.id);
-        toast(row.status === 'quoted' ? 'Quote saved' : 'Job created');
+        toast(row.status === 'enquiry' ? 'Enquiry saved' : row.status === 'quoted' ? 'Quote saved' : 'Job created');
         location.replace(`#/job/${saved.id}`);
         return;
       }
@@ -3429,6 +3646,57 @@ const FORMS = {
 };
 
 const ACT = {
+  actFilter(d) { S.actF = d.f; render(); },
+  pickPeriod(d, el) { const f = el.closest('form'); f.querySelector('input[type=date]').value = d.d; f.querySelectorAll('.chips .chip').forEach(c => c.classList.toggle('on', c === el)); },
+  guaranteeSheet(d) {
+    const j = jobById(d.id); if (!j) return;
+    const base = jobBaseDate(j);
+    openSheet(`<form data-form="guarantee" class="form">${sheetHead('Guarantee')}
+      <input type="hidden" name="id" value="${j.id}">
+      <p class="muted small">How long is the work guaranteed for? (from ${fmtDate(base)})</p>
+      ${periodBtns(base, [[3, '3 months'], [6, '6 months'], [12, '1 year'], [24, '2 years'], [60, '5 years']])}
+      <label>Guaranteed until<input type="date" name="until" value="${esc(j.guarantee_until || '')}"></label>
+      <label>What's covered <span class="muted small">(optional)</span><textarea name="note" rows="2" placeholder="e.g. if the trap fails we come back and replace it">${esc(j.guarantee_note || '')}</textarea></label>
+      <button class="btn primary wide big">Save</button>
+      ${j.guarantee_until ? '<button type="button" class="link-btn danger-text" data-act="guaranteeClear" data-id="' + j.id + '">Remove guarantee</button>' : ''}
+    </form>`);
+  },
+  async guaranteeClear(d) { await saveRow('jobs', d.id, { guarantee_until: null, guarantee_note: null }); closeSheet(); render(); toast('Guarantee removed'); },
+  serviceSheet(d) {
+    const j = jobById(d.id); if (!j) return;
+    const base = jobBaseDate(j);
+    openSheet(`<form data-form="service" class="form">${sheetHead('Service reminder')}
+      <input type="hidden" name="id" value="${j.id}">
+      <p class="muted small">When should this be serviced again? A to-do pops up a month before, so you can ring ${esc(j.customer_name || 'them')} and book it in.</p>
+      ${periodBtns(base, [[6, '6 months'], [12, '1 year'], [24, '2 years']])}
+      <label>Service due<input type="date" name="due" value="${esc(j.service_due || '')}"></label>
+      <button class="btn primary wide big">Save</button>
+      ${j.service_due ? '<button type="button" class="link-btn danger-text" data-act="serviceClear" data-id="' + j.id + '">No reminder</button>' : ''}
+    </form>`);
+  },
+  async serviceClear(d) { await saveRow('jobs', d.id, { service_due: null }); closeSheet(); render(); toast('Reminder removed'); },
+  callbackSheet(d) {
+    const j = jobById(d.id); if (!j) return;
+    openSheet(`<form data-form="callback" class="form">${sheetHead('Log a call-back')}
+      <input type="hidden" name="id" value="${j.id}">
+      <label>Date<input type="date" name="date" value="${today()}"></label>
+      <label>What happened?<textarea name="note" rows="3" required placeholder="e.g. trap leaking again — replaced washer, no charge"></textarea></label>
+      <button class="btn primary wide big">Save</button>
+    </form>`);
+    setTimeout(() => sheet.querySelector('textarea')?.focus(), 60);
+  },
+  async serviceBook(d, el) {
+    const j = jobById(d.id); if (!j) return;
+    await busy(el, async () => {
+      const row = { title: /service/i.test(j.title || '') ? j.title : `Service — ${j.title || 'annual'}`, status: 'enquiry', source: 'repeat', who: j.who || 'both',
+        customer_name: j.customer_name, customer_phone: j.customer_phone, customer_email: j.customer_email, address: j.address, postcode: j.postcode,
+        notes: `Service follow-up from job #${j.ref ?? ''}`, price: 0, vat_applies: j.vat_applies, vat_rate: j.vat_rate, created_by: S.session?.user?.email || null };
+      const n = await saveRow('jobs', null, row);
+      await saveRow('jobs', j.id, { service_due: null });
+      toast('Added as an enquiry'); location.hash = `#/job/${n.id}`;
+    });
+  },
+  async serviceSkip(d) { await saveRow('jobs', d.id, { service_due: null }); render(); toast('Reminder cleared'); },
   homeToggle(d) { S.homeOpen = { ...(S.homeOpen || {}), [d.k]: !(S.homeOpen?.[d.k] ?? true) }; const el = document.getElementById('job-list'); if (el) el.innerHTML = homeGroupsHtml(); },
   contactsFilter(d) { S.contactsF = d.f; render(); },
   contactSheet(d) {
@@ -3588,7 +3856,7 @@ const ACT = {
     const j = rec.job_id ? jobById(rec.job_id) : null;
     const mark = async () => {
       if (!j) return;
-      if (isQuote && !j.quote_date && j.status === 'quoted') await saveRow('jobs', j.id, { quote_date: today() }).catch(console.error);
+      if (isQuote && !j.quote_date && isPre(j)) await saveRow('jobs', j.id, { quote_date: today(), status: 'quoted' }).catch(console.error);
       if (!isQuote) await setMark(j, 'chased_at').catch(console.error);
     };
     if (S.readyPdf && S.readyPdf.key === `doc/${rec.id}`) {
@@ -3668,7 +3936,8 @@ const ACT = {
     try {
       if (it.file_path) await db.removeFiles([it.file_path]).catch(console.error);
       await deleteRow('inbox_items', it.id);
-      closeSheet(); render(); toast('Deleted');
+      S.undo = null;
+      closeSheet(); render(); toast('Removed from the inbox');
     } catch (e) { toast(friendly(e), true); }
   },
   async back() {
@@ -3699,7 +3968,7 @@ const ACT = {
       const path = `${m.job_id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
       await db.upload(path, blob);
       const j = jobById(m.job_id);
-      await saveRow('photos', null, { job_id: m.job_id, path, kind: j.status === 'quoted' ? 'before' : j.status === 'finished' ? 'after' : 'during', caption: m.text || null });
+      await saveRow('photos', null, { job_id: m.job_id, path, kind: isPre(j) ? 'before' : j.status === 'finished' ? 'after' : 'during', caption: m.text || null });
       closeSheet(); toast(`Added to ${jobName(j)} photos`);
     });
   },
@@ -3876,6 +4145,7 @@ const ACT = {
     const patch = { status: d.s };
     if (d.s === 'finished' || d.s === 'declined') patch.finished_date = j.finished_date || today();
     else patch.finished_date = null;
+    if (d.s === 'finished' && !j.service_due && /service/i.test(j.title || '')) patch.service_due = addMonths(patch.finished_date, 12);
     if (d.s === 'finished') {
       const c = calc(j);
       if (c.balance > 0.004 && !await ask(`Mark finished? ${money(c.balance)} is still unpaid — it'll show under "Owed".`)) return;
@@ -3883,23 +4153,29 @@ const ACT = {
     await busy(el, async () => {
       await saveRow('jobs', j.id, patch);
       render();
-      toast(`Marked ${STATUS[d.s]}${d.s === 'finished' || d.s === 'declined' ? ' — moved to Archive' : ''}`);
+      toast(`Marked ${STATUS[d.s]}${patch.service_due ? ' — service reminder set for next year' : d.s === 'finished' || d.s === 'declined' ? ' — moved to Finished jobs' : ''}`);
     });
   },
 
   async deleteRow(d, el) {
-    const what = { costs: 'cost', payments: 'payment', photos: 'photo', overheads: 'overhead', events: 'calendar entry', tasks: 'to-do' }[d.table];
-    if (!await ask(`Delete this ${what}?`, 'Delete', true)) return;
     await busy(el, async () => { await deleteRow(d.table, d.id); closeSheet(); render(); toast('Deleted'); });
   },
+  undoDelete(d, el) { el.disabled = true; undoDelete().catch(e => toast(friendly(e), true)); },
 
   async deleteJob(d, el) {
     const j = jobById(d.id);
-    if (!await ask(`Delete "${jobName(j)}" and all its costs, payments and photos? This can't be undone.\n\nTip: mark it Finished or Declined instead to keep it in the Archive.`, 'Delete job', true)) return;
+    if (!await ask(`Delete "${jobName(j)}" and all its costs, payments and photos?\n\nYou'll have 10 seconds to undo. Tip: mark it Finished or Declined instead to keep it.`, 'Delete job', true)) return;
     await busy(el, async () => {
       const paths = photosOf(j.id).map(p => p.path);
-      await db.removeFiles(paths).catch(console.error);
+      const kids = ['costs', 'payments', 'photos'].flatMap(t => (S.data[t] || []).filter(x => x.job_id === j.id).map(row => ({ table: t, row })));
+      const relink = [...(S.data.events || []).filter(e => e.job_id === j.id).map(e => ({ table: 'events', id: e.id, field: 'job_id', value: j.id })),
+        ...(S.data.docs || []).filter(x => x.job_id === j.id).map(x => ({ table: 'docs', id: x.id, field: 'job_id', value: j.id }))];
+      S.lastWrite = Date.now();
       await db.remove('jobs', j.id);
+      rememberDeleted([{ table: 'jobs', row: j }, ...kids]);
+      S.undo.relink = relink;
+      S.undo.back = `#/job/${j.id}`;
+      S.undo.fileTimer = setTimeout(() => db.removeFiles(paths).catch(console.error), 15000);
       S.data.jobs = S.data.jobs.filter(x => x.id !== j.id);
       ['costs', 'payments', 'photos'].forEach(t => { S.data[t] = S.data[t].filter(x => x.job_id !== j.id); });
       (S.data.events || []).forEach(e => { if (e.job_id === j.id) e.job_id = null; });
@@ -4149,6 +4425,7 @@ document.addEventListener('input', e => {
   if (k === 'search') { S.search = e.target.value; const el = document.getElementById('job-list'); if (el) el.innerHTML = route().view === 'jobs' && !String(S.search).trim() ? homeGroupsHtml() : jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJobQ') { S.chatJobQ = e.target.value; const el = document.getElementById('chat-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5); }
+  if (k === 'srcpick') e.target.closest('.src-pick').querySelectorAll('label').forEach(l => l.classList.toggle('on', l.contains(e.target)));
   if (k === 'contactsQ') { S.contactsQ = e.target.value; const el = document.getElementById('ct-list'); if (el) el.innerHTML = contactRowsHtml(); }
   if (k === 'qJobQ') { S.qJobQ = e.target.value; const el = document.getElementById('q-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.qJobQ, 'qPickJob'); }
   if (k === 'qSavedQ') { S.qSavedQ = e.target.value; const el = document.getElementById('q-saved-list'); if (el) el.innerHTML = qSavedRows(qSavedList()); }

@@ -1155,3 +1155,42 @@ html[data-theme="dark"] .home-actions svg { color: var(--gold); }
 .home-archive > span:not(.chev) { flex: 1; }
 .home-archive .chev { color: var(--muted); font-size: 1.2rem; }
 html[data-theme="dark"] .home-archive svg { color: var(--gold); }
+/* Enquiries + where jobs came from */
+.pill.enquiry { background: #efe6f7; color: #6b3fa0; }
+.new-kind.enquiry { background: #efe6f7; color: #6b3fa0; }
+.job.enquiry, .card.job.enquiry { border-left-color: #8a5cc4; }
+html[data-theme="dark"] .pill.enquiry, html[data-theme="dark"] .new-kind.enquiry { background: #2e2342; color: #c9a8ee; }
+.src-pick label.chip { position: relative; cursor: pointer; }
+.src-pick label.chip input { position: absolute; opacity: 0; pointer-events: none; }
+.src-pick label.chip.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+html[data-theme="dark"] .src-pick label.chip.on { background: var(--gold); border-color: var(--gold); color: #0c1a24; }
+.toast.has-undo { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
+.toast-undo { background: var(--gold); color: var(--navy); border: 0; border-radius: 8px; padding: 6px 12px; font: inherit; font-weight: 700; cursor: pointer; }
+/* Recent changes */
+.act-list { padding: 6px 14px; }
+.act-day { font-weight: 700; font-size: .85rem; color: var(--muted); margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+.act-row { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: .9rem; line-height: 1.35; }
+.act-day + .act-row { border-top: 0; }
+.act-time { flex: none; width: 46px; color: var(--muted); font-size: .8rem; padding-top: 1px; }
+.act-who { font-weight: 700; color: var(--gold-deep); }
+html[data-theme="dark"] .act-who { color: var(--gold); }
+.act-job summary { cursor: pointer; list-style: none; }
+.act-job summary::-webkit-details-marker { display: none; }
+.act-job[open] summary { margin-bottom: 6px; }
+/* Aftercare */
+.aftercare .ac-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.aftercare .ac-row:first-of-type { border-top: 0; }
+.aftercare .ac-ico { width: 26px; text-align: center; flex: none; }
+.aftercare .ac-main { flex: 1; min-width: 0; }
+.aftercare b.ok { color: var(--green-2, #2e7d4f); }
+.ac-cbs { margin: 4px 0 0 36px; padding: 0; list-style: none; font-size: .88rem; }
+.ac-cbs li { padding: 3px 0; }
+/* Where work comes from */
+.src-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.src-table th { text-align: right; font-size: .72rem; color: var(--muted); font-weight: 600; padding: 4px 2px; }
+.src-table td { text-align: right; padding: 7px 2px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.src-table td:first-child, .src-table th:first-child { text-align: left; font-weight: 600; }
+.src-table em { font-style: normal; color: var(--muted); font-size: .75rem; }
+.src-cta { margin-top: 10px; padding: 10px; border-radius: 10px; font-size: .9rem; background: var(--bg); }
+.src-cta.ok { background: rgba(46,125,79,.1); }
+.src-cta.warn { background: rgba(200,60,60,.08); }
