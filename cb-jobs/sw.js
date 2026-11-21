@@ -3,7 +3,7 @@
 // always comes live from Supabase (the app keeps its own last-loaded copy).
 //
 // When you update the app, bump VERSION (and the ?v= numbers in index.html).
-const VERSION = '20261121f';
+const VERSION = '20261121g';
 const CACHE = `cbjobs-${VERSION}`;
 
 const SHELL = [

@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121f';
-const VERSION_TAG = '20261121f';
+import { db, DEMO } from './db.js?v=20261121g';
+const VERSION_TAG = '20261121g';
 
-const APP_VERSION = '21 Nov 2026 (6)';
+const APP_VERSION = '21 Nov 2026 (7)';
 
 // ======================================================================
 // State & helpers
@@ -1393,6 +1393,7 @@ function actVal(k, v) {
   if (k === 'source') return SOURCES[v] || v;
   if (['price', 'amount', 'unit_cost', 'total'].includes(k)) return money(v);
   if (['who', 'paid_by', 'received_by'].includes(k)) return v === 'both' ? 'Both' : v === 'split' ? 'Split' : nameOf(v);
+  if (v === NO_END) return 'no end date';
   if (/_date$|_until$|_due$|chased_at/.test(k)) return fmtShort(String(v).slice(0, 10));
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
   if (Array.isArray(v)) return `${v.length}`;
@@ -1970,12 +1971,14 @@ function jobView({ id }) {
 
 // ----- Aftercare: guarantee, call-backs, service reminder -----
 const jobBaseDate = j => j.finished_date || j.end_date || j.start_date || today();
+const NO_END = '9999-12-31'; // guarantee with no end date
+const gUntil = d => d === NO_END ? 'no end date' : fmtDate(d);
 function aftercareHtml(j) {
   if (j.status !== 'active' && j.status !== 'finished') return '';
   const t = today();
   const cbs = Array.isArray(j.callbacks) ? j.callbacks : [];
   const g = j.guarantee_until;
-  const gLine = g ? (g >= t ? `<b class="ok">Guaranteed until ${fmtDate(g)}</b>` : `<b class="muted">Guarantee ended ${fmtDate(g)}</b>`) : '<span class="muted">No guarantee recorded</span>';
+  const gLine = g ? (g === NO_END ? '<b class="ok">Guaranteed — no end date</b>' : g >= t ? `<b class="ok">Guaranteed until ${fmtDate(g)}</b>` : `<b class="muted">Guarantee ended ${fmtDate(g)}</b>`) : '<span class="muted">No guarantee recorded</span>';
   const sv = j.service_due;
   return `<section class="card aftercare">
     <h3>Aftercare</h3>
@@ -2648,7 +2651,7 @@ function archiveListHtml() {
   if (y === 'service') list.sort((a, b) => String(a.service_due).localeCompare(String(b.service_due)));
   if (y === 'guarantee' || y === 'service') {
     list = list.filter(j => matches(j, S.archiveSearch));
-    return list.length ? list.map(j => `${jobCard(j)}`.replace('</a>', `<div class="muted small arch-extra">${y === 'guarantee' ? `🛡 Guaranteed until ${fmtDate(j.guarantee_until)}${j.guarantee_note ? ` — ${esc(j.guarantee_note)}` : ''}` : `🔧 Service due ${fmtDate(j.service_due)}`}</div></a>`)).join('')
+    return list.length ? list.map(j => `${jobCard(j)}`.replace('</a>', `<div class="muted small arch-extra">${y === 'guarantee' ? `🛡 Guaranteed ${j.guarantee_until === NO_END ? '— no end date' : `until ${fmtDate(j.guarantee_until)}`}${j.guarantee_note ? ` — ${esc(j.guarantee_note)}` : ''}` : `🔧 Service due ${fmtDate(j.service_due)}`}</div></a>`)).join('')
       : `<div class="empty">${y === 'guarantee' ? 'No jobs under guarantee. Add one from a job\u2019s Aftercare section.' : 'No service reminders set. Add one from a job\u2019s Aftercare section.'}</div>`;
   }
   if (y !== 'all' && y !== 'declined') list = list.filter(j => (j.finished_date || j.updated_at || '').startsWith(y));
@@ -3832,7 +3835,7 @@ const ACT = {
     openSheet(`<form data-form="guarantee" class="form">${sheetHead('Guarantee')}
       <input type="hidden" name="id" value="${j.id}">
       <p class="muted small">How long is the work guaranteed for? (from ${fmtDate(base)})</p>
-      ${periodBtns(base, [[3, '3 months'], [6, '6 months'], [12, '1 year'], [24, '2 years'], [60, '5 years']])}
+      ${periodBtns(base, [[3, '3 months'], [6, '6 months'], [12, '1 year'], [24, '2 years'], [60, '5 years']]).replace('</div>', `<button type="button" class="chip" data-act="pickPeriod" data-d="${NO_END}">No end date</button></div>`)}
       <label>Guaranteed until<input type="date" name="until" value="${esc(j.guarantee_until || '')}"></label>
       <label>What's covered <span class="muted small">(optional)</span><textarea name="note" rows="2" placeholder="e.g. if the trap fails we come back and replace it">${esc(j.guarantee_note || '')}</textarea></label>
       <button class="btn primary wide big">Save</button>
