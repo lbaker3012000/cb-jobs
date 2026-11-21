@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121a';
-const VERSION_TAG = '20261121a';
+import { db, DEMO } from './db.js?v=20261121b';
+const VERSION_TAG = '20261121b';
 
-const APP_VERSION = '21 Nov 2026';
+const APP_VERSION = '21 Nov 2026 (2)';
 
 // ======================================================================
 // State & helpers
@@ -1305,18 +1305,35 @@ function contactView(key) {
   const phone = String(c.phone || '').replace(/[^\d+]/g, '');
   const addr = [String(c.address || '').split('\n').join(', '), c.postcode].filter(Boolean).join(', ');
   const jobs = c.jobs.slice().sort((a, b) => String(b.start_date || b.created_at).localeCompare(String(a.start_date || a.created_at)));
+  // Customer history
+  const done = jobs.filter(j => j.status === 'active' || j.status === 'finished');
+  const sums = done.reduce((t, j) => { const k = calc(j); t.work += k.gross; t.paid += k.paid; if (j.status === 'finished') t.owed += Math.max(0, k.balance); return t; }, { work: 0, paid: 0, owed: 0 });
+  const openQuotes = jobs.filter(j => j.status === 'quoted');
+  const dates = jobs.map(j => j.start_date || j.finished_date || String(j.created_at).slice(0, 10)).filter(Boolean).sort();
+  const jobIds = new Set(jobs.map(j => j.id));
+  const nm = String(c.name || '').trim().toLowerCase();
+  const docs = qDocs().filter(d => jobIds.has(d.job_id) || (nm && String(d.customer?.name || '').trim().toLowerCase() === nm))
+    .sort((a, b) => String(b.doc_date).localeCompare(String(a.doc_date)));
+  const pays = (S.data.payments || []).filter(p => jobIds.has(p.job_id)).sort((a, b) => String(b.pay_date).localeCompare(String(a.pay_date)));
   const body = `
   <section class="hero">
     <div class="row"><h2>${esc(c.name)}</h2><span class="pill">${CONTACT_KINDS[c.kind] || 'Contact'}</span></div>
     ${c.company ? `<div class="hero-who">${esc(c.company)}</div>` : ''}
-    <div class="quick">
+    <div class="quick ct-quick">
       ${phone ? `<a href="tel:${esc(phone)}">${ICON.phone}<span>Call</span></a>` : `<span class="off">${ICON.phone}<span>Call</span></span>`}
       ${phone ? `<a href="sms:${esc(phone)}">${ICON.chat}<span>Text</span></a>` : `<span class="off">${ICON.chat}<span>Text</span></span>`}
       ${c.email ? `<a href="mailto:${esc(c.email)}">${ICON.send}<span>Email</span></a>` : `<span class="off">${ICON.send}<span>Email</span></span>`}
       ${addr ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener">${ICON.pin}<span>Directions</span></a>` : `<span class="off">${ICON.pin}<span>Directions</span></span>`}
     </div>
   </section>
+  ${jobs.length ? `<div class="glance ct-stats">
+    <div><b>${done.length}</b><span>job${done.length === 1 ? '' : 's'} done</span></div>
+    <div><b>${money0(sums.work)}</b><span>work in total</span></div>
+    <div class="${sums.owed > 0.004 ? 'warn' : ''}"><b>${money0(sums.owed)}</b><span>owed</span></div>
+  </div>
+  <p class="muted small ct-since">${dates.length ? `Customer since ${fmtDate(dates[0])}${dates.length > 1 ? ` · latest ${fmtDate(dates[dates.length - 1])}` : ''}` : ''}${openQuotes.length ? ` · ${openQuotes.length} quote${openQuotes.length > 1 ? 's' : ''} waiting` : ''}${sums.paid ? ` · ${money0(sums.paid)} paid so far` : ''}</p>` : ''}
   <section class="card">
+    <h3>Details</h3>
     ${c.phone ? `<div class="kv"><span>Phone</span><b>${esc(c.phone)}</b></div>` : ''}
     ${phone ? `<div class="kv"><span>WhatsApp</span><a href="https://wa.me/${waNumber(phone)}" target="_blank" rel="noopener">Open chat</a></div>` : ''}
     ${c.email ? `<div class="kv"><span>Email</span><b class="ct-wrap">${esc(c.email)}</b></div>` : ''}
@@ -1324,7 +1341,11 @@ function contactView(key) {
     ${c.notes ? `<div class="ct-notes">${nl2br(c.notes)}</div>` : ''}
     ${!c.phone && !c.email && !addr && !c.notes ? '<p class="muted small">No details yet.</p>' : ''}
   </section>
-  ${jobs.length ? `<section class="card"><h3>Jobs</h3>${jobs.map(j => `<a class="kv link" href="#/job/${j.id}"><span>${esc(j.title || jobName(j))} <em class="muted">#${j.ref ?? ''}${j.start_date ? ` · ${fmtShort(j.start_date)}` : ''}</em></span><b>${pill(j.status)}</b></a>`).join('')}</section>` : ''}
+  ${jobs.length ? `<section class="card"><h3>Jobs (${jobs.length})</h3>${jobs.map(j => { const k = calc(j); return `<a class="ct-job" href="#/job/${j.id}">
+      <span class="ct-job-main"><b>${esc(j.title || 'Job')}</b><span class="muted small">#${j.ref ?? ''}${j.start_date ? ` · ${fmtShort(j.start_date)}` : ''}${jobAddr(j) && jobAddr(j) !== String(c.address || '').split('\n').join(', ') ? ` · ${esc(jobAddr(j))}` : ''}</span></span>
+      <span class="ct-job-side">${pill(j.status)}<b>${k.gross ? money0(k.gross) : '—'}</b>${j.status === 'finished' && k.balance > 0.004 ? `<em class="owed">${money0(k.balance)} owed</em>` : ''}</span></a>`; }).join('')}</section>` : '<section class="card"><p class="muted small">No jobs with us yet.</p></section>'}
+  ${docs.length ? `<section class="card"><h3>Quotes &amp; invoices</h3>${docs.map(d => `<a class="kv link" href="#/quotes/view/${d.id}"><span>${d.doc_type === 'quote' ? 'Quote' : 'Invoice'} *${d.number} <em class="muted">${fmtShort(d.doc_date)}${d.paid_in_full ? ' · paid' : ''}</em></span><b>${qMoney(d.total)}</b></a>`).join('')}</section>` : ''}
+  ${pays.length ? `<section class="card"><h3>Payments</h3>${pays.slice(0, 20).map(p => `<div class="kv"><span>${fmtShort(p.pay_date)} <em class="muted">${esc(jobById(p.job_id)?.title || '')}</em></span><b>${money(p.amount)}</b></div>`).join('')}</section>` : ''}
   <div class="q-after">
     <button class="btn primary wide" data-act="contactQuote" data-key="${esc(c.key)}">${ICON.doc} New quote for ${esc(String(c.name).split(' ')[0])}</button>
     <button class="btn wide" data-act="contactSheet" data-key="${esc(c.key)}">${c.saved ? 'Edit contact' : 'Add notes / edit details'}</button>
@@ -1586,6 +1607,16 @@ function matches(j, q) {
     .some(v => String(v || '').toLowerCase().includes(q));
 }
 
+// Customers / contacts matching the Jobs search, shown above the jobs
+function searchProfilesHtml(q) {
+  if (!String(q || '').trim() || String(q).trim().length < 2) return '';
+  const hits = contactList().filter(c => contactMatches(c, q)).slice(0, 4);
+  if (!hits.length) return '';
+  return `<div class="ct-hits"><div class="muted small">Customers &amp; contacts</div>${hits.map(c => `<a class="ct-row" href="#/contacts/${encodeURIComponent(c.key)}">
+    <span class="ct-av k-${c.kind}">${esc((String(c.name || '?').trim()[0] || '?').toUpperCase())}</span>
+    <span class="ct-main"><b>${esc(c.name)}</b><span class="muted small">${[c.kind !== 'customer' ? CONTACT_KINDS[c.kind] : '', c.phone, c.postcode].filter(Boolean).map(esc).join(' · ')}</span></span>
+    ${c.jobs.length ? `<span class="ct-jobs">${c.jobs.length} job${c.jobs.length > 1 ? 's' : ''}</span>` : ''}<span class="ct-go">Profile ›</span></a>`).join('')}</div>`;
+}
 function jobListHtml() {
   let list = S.data.jobs.slice();
   const f = S.filter;
@@ -1596,10 +1627,11 @@ function jobListHtml() {
   list.sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
     || String(a.start_date || '9999').localeCompare(String(b.start_date || '9999'))
     || String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const profiles = searchProfilesHtml(S.search);
   if (!list.length) {
-    return `<div class="empty">${S.data.jobs.length ? 'No jobs match.' : `No jobs yet. Tap <b>+</b> to add your first job or quote.${DEMO ? '<br><br><button class="btn primary" data-act="seed">Load sample jobs to try it out</button>' : ''}`}</div>`;
+    return profiles + `<div class="empty">${S.data.jobs.length ? 'No jobs match.' : `No jobs yet. Tap <b>+</b> to add your first job or quote.${DEMO ? '<br><br><button class="btn primary" data-act="seed">Load sample jobs to try it out</button>' : ''}`}</div>`;
   }
-  return list.map(jobCard).join('');
+  return profiles + list.map(jobCard).join('');
 }
 
 // The site visit to price up a quote: the job's next calendar "visit" entry
@@ -1642,6 +1674,8 @@ function jobView({ id }) {
     <section class="hero">
       <div class="row"><h2>${esc(jobName(j))}</h2>${pill(j.status)}</div>
       <div class="hero-who">${esc(jobSub(j) || 'No customer')}${jobAddr(j) && j.postcode ? ` · ${esc(j.postcode)}` : ''}</div>
+      ${(() => { const cp = j.customer_name || j.customer_phone ? contactList().find(x => x.jobs.some(y => y.id === j.id)) : null;
+        return cp ? `<a class="hero-profile" href="#/contacts/${encodeURIComponent(cp.key)}">${ICON.people} ${esc(cp.name)}'s profile${cp.jobs.length > 1 ? ` · ${cp.jobs.length} jobs` : ''} ›</a>` : ''; })()}
       <div class="quick">
         ${phone ? `<a href="tel:${esc(phone)}">${ICON.phone}<span>Call</span></a>` : '<span class="off">' + ICON.phone + '<span>Call</span></span>'}
         <a href="#/quotes/job-${j.status === 'quoted' || j.status === 'declined' ? 'quote' : 'invoice'}/${j.id}">${ICON.doc}<span>${j.status === 'quoted' || j.status === 'declined' ? 'Quote' : 'Invoice'}</span></a>

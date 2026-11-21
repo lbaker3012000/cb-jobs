@@ -1104,3 +1104,22 @@ html[data-theme="dark"] .ct-av.k-supplier { background: var(--gold); color: #0c1
 @media (max-width: 370px) {
   .tabs a span { font-size: 8.6px; letter-spacing: -.03em; }
 }
+/* CRM profile */
+.ct-stats { margin-bottom: 4px; }
+.ct-since { margin: 0 4px 12px; }
+.ct-job { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); color: inherit; text-decoration: none; }
+.ct-job:first-of-type { border-top: 0; }
+.ct-job-main { display: flex; flex-direction: column; min-width: 0; }
+.ct-job-side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
+.ct-job-side em.owed { font-style: normal; font-size: .75rem; font-weight: 600; color: var(--red); }
+.ct-hits { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 8px 12px 2px; margin-bottom: 12px; }
+.ct-hits .ct-row:first-of-type { border-top: 0; }
+.ct-go { flex: none; font-size: .8rem; font-weight: 600; color: var(--gold-deep); }
+html[data-theme="dark"] .ct-go { color: var(--gold); }
+.hero-profile { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: .85rem; font-weight: 600; color: var(--gold-deep); text-decoration: none; }
+.hero-profile svg { width: 16px; height: 16px; }
+html[data-theme="dark"] .hero-profile { color: var(--gold); }
+.glance > div { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.glance > div.warn b { color: var(--red); }
+.quick.ct-quick { grid-template-columns: repeat(4, 1fr); }
+.quick.ct-quick a, .quick.ct-quick span.off { font-size: .8rem; }
