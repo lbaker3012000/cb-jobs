@@ -1123,3 +1123,30 @@ html[data-theme="dark"] .hero-profile { color: var(--gold); }
 .glance > div.warn b { color: var(--red); }
 .quick.ct-quick { grid-template-columns: repeat(4, 1fr); }
 .quick.ct-quick a, .quick.ct-quick span.off { font-size: .8rem; }
+
+/* ===== Home screen (simpler layout) ===== */
+.home-hello { margin: 4px 4px 12px; }
+.home-hello h2 { margin: 0; font-size: 1.45rem; }
+.home-hello .muted { font-size: .95rem; }
+.home-today h3 { margin: 0 0 6px; font-size: 1.15rem; }
+.home-today .row { align-items: baseline; }
+.home-today .cal-item b { font-size: 1.02rem; }
+.home-tmr { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.home-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 14px; }
+.home-actions a { display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 12px 14px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); color: var(--ink); text-decoration: none; font-weight: 700; font-size: 1rem; line-height: 1.2; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.home-actions a:first-child { background: var(--navy); border-color: var(--navy); color: #fff; }
+.home-actions svg { width: 28px; height: 28px; flex: none; color: var(--gold-deep); stroke: currentColor; }
+.home-actions a:first-child svg { color: var(--gold); }
+.home-actions a:active { transform: scale(.98); }
+.home-search { margin-top: 4px; }
+.home-search input { font-size: 1rem; padding: 13px 14px; }
+.home-group { margin-bottom: 8px; }
+.home-ghead { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 4px 8px; background: none; border: 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.home-ghead b { font-size: 1.12rem; }
+.home-ghead .count { display: inline-block; min-width: 22px; padding: 1px 7px; margin-left: 4px; border-radius: 999px; background: var(--gold); color: var(--navy); font-size: .8rem; font-weight: 700; text-align: center; }
+.home-ghead .chev { color: var(--muted); font-size: 1rem; }
+.g-owed .home-ghead .count { background: var(--red); color: #fff; }
+.home-hint { margin: -2px 4px 8px; }
+html[data-theme="dark"] .home-actions a:first-child { background: var(--gold); border-color: var(--gold); color: #0c1a24; }
+html[data-theme="dark"] .home-actions a:first-child svg { color: #0c1a24; }
+html[data-theme="dark"] .home-actions svg { color: var(--gold); }

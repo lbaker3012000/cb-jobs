@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121b';
-const VERSION_TAG = '20261121b';
+import { db, DEMO } from './db.js?v=20261121c';
+const VERSION_TAG = '20261121c';
 
-const APP_VERSION = '21 Nov 2026 (2)';
+const APP_VERSION = '21 Nov 2026 (3)';
 
 // ======================================================================
 // State & helpers
@@ -397,7 +397,7 @@ function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   <main>${body}</main>
   ${fab}
   ${nav ? `<nav class="tabs">
-    ${tab('jobs', 'Jobs', ICON.jobs)}
+    ${tab('jobs', 'Home', ICON.jobs)}
     ${tab('calendar', 'Calendar', ICON.cal)}
     ${tab('quotes', 'Quotes', ICON.doc)}
     ${tab('contacts', 'Contacts', ICON.people)}
@@ -1422,33 +1422,73 @@ function notMemberView() {
 // ======================================================================
 function jobsView() {
   const jobs = S.data.jobs;
-  const live = jobs.filter(j => j.status === 'quoted' || j.status === 'active');
-  const active = jobs.filter(j => j.status === 'active');
-  const quoted = jobs.filter(j => j.status === 'quoted');
-  const unpaid = jobs.filter(j => j.status === 'finished' && calc(j).balance > 0.004);
+  const t = today();
+  const hour = new Date().getHours();
+  const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const name = S.meKnown ? nameOf(S.me) : '';
+  const dlToday = deadlinesIn(t, t);
+  const dd = dayData(t, dlToday);
+  const tmr = dayData(addDays(t, 1), deadlinesIn(addDays(t, 1), addDays(t, 1)));
+  const nTmr = tmr.jobs.length + tmr.events.length;
+  const other = S.meKnown ? nameOf(otherOf(S.me)) : 'partner';
+  const searching = String(S.search || '').trim().length > 0;
   const body = `
-  <div class="glance">
-    <button data-act="filter" data-f="active"><b>${active.length}</b><span>active job${active.length === 1 ? '' : 's'}</span></button>
-    <button data-act="filter" data-f="quoted"><b>${money0(sum(quoted.map(j => calc(j).gross)))}</b><span>${quoted.length} quote${quoted.length === 1 ? '' : 's'} out</span></button>
-    <button data-act="filter" data-f="owed" class="${unpaid.length ? 'warn' : ''}"><b>${money0(sum(unpaid.map(j => calc(j).balance)))}</b><span>owed to you</span></button>
+  <div class="home-hello"><h2>${hello}${name ? `, ${esc(name)}` : ''}</h2>
+    <span class="muted">${parseISO(t).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span></div>
+
+  <section class="card home-today">
+    <div class="row"><h3>Today</h3><a class="muted small" href="#/calendar">Calendar ›</a></div>
+    ${dayItemsHtml(t, dd)}
+    <div class="muted small home-tmr">Tomorrow: ${nTmr ? `${nTmr} thing${nTmr === 1 ? '' : 's'} booked` : 'nothing booked yet'}</div>
+  </section>
+
+  <div class="home-actions">
+    <a href="#/edit/new">${ICON.plus}<span>New job<br>or quote</span></a>
+    <a href="#/inbox">${ICON.upload}<span>Add a receipt<br>or invoice</span></a>
+    <a href="#/chat">${ICON.chat}<span>Message<br>${esc(other)}</span></a>
+    <a href="#/contacts">${ICON.people}<span>Find a<br>customer</span></a>
   </div>
-  ${stripHtml()}
+
   ${inboxBannerHtml()}
   ${msgBannerHtml()}
   ${todoHtml()}
-  <h2 class="section-title">Jobs</h2>
-  <div class="toolbar">
-    <input type="search" placeholder="Search address, customer or job" value="${esc(S.search)}" data-input="search">
+
+  <div class="toolbar home-search">
+    <input type="search" placeholder="Search any job, customer, address or phone" value="${esc(S.search)}" data-input="search">
   </div>
-  <div class="chips">
-    ${[['all', `Live (${live.length})`], ['active', 'Active'], ['quoted', 'Quoted'], ['owed', 'Owed']].map(([k, l]) =>
-      `<button class="chip ${S.filter === k ? 'on' : ''}" data-act="filter" data-f="${k}">${l}</button>`).join('')}
-  </div>
-  <div id="job-list">${jobListHtml()}</div>`;
-  return layout({
-    title: 'Jobs', right: refreshBtn, body,
-    fab: `<a class="fab fab-wide" href="#/edit/new">${ICON.plus}<span>New job</span></a>`,
-  });
+  <div id="job-list">${searching ? jobListHtml() : homeGroupsHtml()}</div>
+
+  ${stripHtml()}`;
+  return layout({ title: 'Home', right: refreshBtn, body });
+}
+
+// The jobs, in plain groups: what's on now, booked in, quotes waiting, money owed
+function homeGroupsHtml() {
+  const t = today();
+  const jobs = S.data.jobs;
+  if (!jobs.length) return jobListHtml();
+  const running = j => j.status === 'active' && j.start_date && j.start_date <= t && (j.end_date && j.end_date >= j.start_date ? j.end_date : j.start_date) >= t;
+  const byStart = (a, b) => String(a.start_date || '9999').localeCompare(String(b.start_date || '9999'));
+  const onNow = jobs.filter(running).sort(byStart);
+  const booked = jobs.filter(j => j.status === 'active' && !running(j)).sort(byStart);
+  const quotes = jobs.filter(j => j.status === 'quoted').sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const owed = jobs.filter(j => j.status === 'finished' && calc(j).balance > 0.004).sort((a, b) => String(a.finished_date || '').localeCompare(String(b.finished_date || '')));
+  const group = (key, title, list, extra = '', hint = '') => {
+    if (!list.length) return '';
+    const open = S.homeOpen?.[key] ?? true;
+    return `<section class="home-group g-${key}">
+      <button class="home-ghead" data-act="homeToggle" data-k="${key}" aria-expanded="${open}">
+        <span><b>${title}</b> <span class="count">${list.length}</span>${extra ? ` <span class="muted small">${extra}</span>` : ''}</span><span class="chev">${open ? '▾' : '▸'}</span></button>
+      ${open ? `${hint ? `<p class="muted small home-hint">${hint}</p>` : ''}${list.map(jobCard).join('')}` : ''}
+    </section>`;
+  };
+  const out = [
+    group('now', 'On now', onNow),
+    group('booked', 'Booked in', booked, '', booked.some(j => !j.start_date) ? 'Jobs without a date are at the bottom — tap one to set a date.' : ''),
+    group('quotes', 'Quotes waiting for an answer', quotes, quotes.length ? money0(sum(quotes.map(j => calc(j).gross))) : ''),
+    group('owed', 'Waiting to be paid', owed, owed.length ? money0(sum(owed.map(j => calc(j).balance))) : ''),
+  ].join('');
+  return out || '<div class="empty">Nothing on at the moment. Tap <b>New job or quote</b> to add one.</div>';
 }
 
 // Due-date label for a to-do: overdue / today / tomorrow / date
@@ -1619,8 +1659,9 @@ function searchProfilesHtml(q) {
 }
 function jobListHtml() {
   let list = S.data.jobs.slice();
-  const f = S.filter;
-  if (f === 'all') list = list.filter(j => j.status === 'quoted' || j.status === 'active');
+  const f = String(S.search || '').trim() ? 'any' : S.filter;
+  if (f === 'any') { /* searching: every job, finished ones too */ }
+  else if (f === 'all') list = list.filter(j => j.status === 'quoted' || j.status === 'active');
   else if (f === 'owed') list = list.filter(j => j.status === 'finished' && calc(j).balance > 0.004);
   else list = list.filter(j => j.status === f);
   list = list.filter(j => matches(j, S.search));
@@ -3459,6 +3500,7 @@ const FORMS = {
 };
 
 const ACT = {
+  homeToggle(d) { S.homeOpen = { ...(S.homeOpen || {}), [d.k]: !(S.homeOpen?.[d.k] ?? true) }; const el = document.getElementById('job-list'); if (el) el.innerHTML = homeGroupsHtml(); },
   contactsFilter(d) { S.contactsF = d.f; render(); },
   contactSheet(d) {
     const c = d.key ? contactList().find(x => x.key === d.key) : null;
@@ -4217,7 +4259,7 @@ document.addEventListener('input', e => {
   if (form && form.dataset.form !== 'login' && !e.target.matches('[type=search]')) form.dataset.dirty = '1';
   const k = e.target.dataset?.input;
   if (!k) return;
-  if (k === 'search') { S.search = e.target.value; document.getElementById('job-list').innerHTML = jobListHtml(); }
+  if (k === 'search') { S.search = e.target.value; const el = document.getElementById('job-list'); if (el) el.innerHTML = route().view === 'jobs' && !String(S.search).trim() ? homeGroupsHtml() : jobListHtml(); }
   if (k === 'chatDraft') { S.chatDraft = e.target.value; growChat(e.target); }
   if (k === 'chatJobQ') { S.chatJobQ = e.target.value; const el = document.getElementById('chat-suggest'); if (el) el.innerHTML = jobSuggestHtml(S.chatJobQ, 'chatPickJob', 5); }
   if (k === 'contactsQ') { S.contactsQ = e.target.value; const el = document.getElementById('ct-list'); if (el) el.innerHTML = contactRowsHtml(); }
