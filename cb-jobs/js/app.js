@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261123b';
-const VERSION_TAG = '20261123b';
+import { db, DEMO } from './db.js?v=20261123c';
+const VERSION_TAG = '20261123c';
 
-const APP_VERSION = '23 Nov 2026 (2)';
+const APP_VERSION = '23 Nov 2026 (3)';
 
 // ======================================================================
 // State & helpers
@@ -2827,26 +2827,38 @@ function statsView() {
     ${noPrice ? `<p class="muted small">${noPrice} job${noPrice > 1 ? 's have' : ' has'} no price yet, so ${noPrice > 1 ? 'they add' : 'it adds'} nothing here.</p>` : ''}
   </section>`;
 
-  // Month by month (last 12 months that have anything)
+  // Month by month (last 12 months) and week by week (last 12 weeks, Mon–Sun)
+  const t0 = today(), now = parseISO(t0);
+  const cap = iso => (iso > t0 ? t0 : iso);
+  const bucket = (lab, from, to) => { const x = statsFor(from, cap(to)); return { lab, rev: x.rev, gp: x.gp, net: x.net, n: x.fin.length }; };
   const months = [];
-  const now = parseISO(today());
   for (let i = 11; i >= 0; i--) {
     const a = new Date(now.getFullYear(), now.getMonth() - i, 1), b = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-    const x = statsFor(toISO(a), toISO(b) > today() ? today() : toISO(b));
-    months.push({ lab: a.toLocaleDateString('en-GB', { month: 'short' }), rev: x.rev, gp: x.gp, net: x.net, n: x.fin.length });
+    months.push(bucket(a.toLocaleDateString('en-GB', { month: 'short' }), toISO(a), toISO(b)));
   }
   while (months.length > 3 && !months[0].rev && !months[0].n) months.shift();
-  const top = Math.max(1, ...months.map(x => x.rev));
-  const chart = `<section class="card">
-    <h3>Month by month</h3>
-    <div class="mchart">${months.map(x => `<div class="mc-col" title="${x.lab}: revenue ${money0(x.rev)}, profit ${money0(x.gp)}">
+  const monday = addDays(t0, -((now.getDay() + 6) % 7));
+  const weeks = [];
+  for (let i = 11; i >= 0; i--) {
+    const ws = addDays(monday, -7 * i);
+    weeks.push(bucket(fmtShort(ws), ws, addDays(ws, 6)));
+  }
+  while (weeks.length > 4 && !weeks[0].rev && !weeks[0].n) weeks.shift();
+  const chartCard = (title, rows, colLabel, note) => {
+    const top = Math.max(1, ...rows.map(x => x.rev));
+    return `<section class="card">
+    <h3>${title}</h3>
+    <div class="mchart">${rows.map(x => `<div class="mc-col" title="${x.lab}: revenue ${money0(x.rev)}, profit ${money0(x.gp)}">
       <div class="mc-bars"><i class="r" style="height:${Math.round(x.rev / top * 100)}%"></i><i class="p" style="height:${Math.round(Math.max(0, x.gp) / top * 100)}%"></i></div>
       <span>${x.lab}</span></div>`).join('')}</div>
     <div class="legend"><span><i class="mc-r"></i>Revenue</span><span><i class="mc-p"></i>Profit before overheads</span></div>
-    <table class="src-table mc-table"><thead><tr><th></th><th>Jobs</th><th>Revenue</th><th>Profit</th><th>After all costs</th></tr></thead><tbody>
-      ${months.slice().reverse().map(x => `<tr><td>${x.lab}</td><td>${x.n}</td><td>${money0(x.rev)}</td><td>${money0(x.gp)}</td><td class="${x.net < 0 ? 'neg' : ''}">${money0(x.net)}</td></tr>`).join('')}
-    </tbody></table>
+    <table class="src-table mc-table"><thead><tr><th>${colLabel}</th><th>Jobs</th><th>Revenue</th><th>Profit</th><th>After all costs</th></tr></thead><tbody>
+      ${rows.slice().reverse().map(x => `<tr><td>${x.lab}</td><td>${x.n}</td><td>${money0(x.rev)}</td><td>${money0(x.gp)}</td><td class="${x.net < 0 ? 'neg' : ''}">${money0(x.net)}</td></tr>`).join('')}
+    </tbody></table>${note ? `<p class="muted small">${note}</p>` : ''}
   </section>`;
+  };
+  const chart = chartCard('Week by week', weeks, 'Week of', 'Weeks run Monday to Sunday.').replace('class="mchart"', `class="mchart weeks${weeks.length > 6 ? ' many' : ''}"`)
+    + chartCard('Month by month', months, '');
 
   const body = `
   <div class="chips">${STAT_PERIODS.map(([pk, pl]) => `<button class="chip ${pk === k ? 'on' : ''}" data-act="statPeriod" data-k="${pk}">${pl}</button>`).join('')}</div>

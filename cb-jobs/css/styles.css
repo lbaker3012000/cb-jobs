@@ -1331,3 +1331,7 @@ html[data-theme="dark"] .mc-bars i.r, html[data-theme="dark"] .legend i.mc-r { b
 .mc-table { margin-top: 12px; }
 .stats-best .kv span:first-child { white-space: nowrap; }
 .stats-best .kv a { text-align: right; }
+.mchart.weeks { gap: 3px; }
+.mchart.weeks .mc-col span { font-size: .68rem; white-space: nowrap; }
+.mchart.weeks.many .mc-col span { font-size: .6rem; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; margin-top: 4px; }
+.mchart.weeks { height: 170px; }
