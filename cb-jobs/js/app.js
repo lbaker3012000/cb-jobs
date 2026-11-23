@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261123a';
-const VERSION_TAG = '20261123a';
+import { db, DEMO } from './db.js?v=20261123b';
+const VERSION_TAG = '20261123b';
 
-const APP_VERSION = '23 Nov 2026';
+const APP_VERSION = '23 Nov 2026 (2)';
 
 // ======================================================================
 // State & helpers
@@ -397,7 +397,7 @@ function render() {
   const r = route();
   const views = {
     jobs: jobsView, job: jobView, edit: editView, calendar: calendarView,
-    archive: archiveView, notes: notesView, money: moneyView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView, contacts: contactsView, activity: activityView,
+    archive: archiveView, notes: notesView, money: moneyView, stats: statsView, settings: settingsView, doc: docView, overheads: moneyView, chat: chatView, inbox: inboxView, quotes: quotesView, contacts: contactsView, activity: activityView,
   };
   const typing = r.view === 'chat' && document.activeElement?.id === 'chat-input';
   const nearBottom = r.view !== 'chat' || (window.innerHeight + window.scrollY >= document.body.scrollHeight - 160);
@@ -427,7 +427,7 @@ function after(r) {
 
 function layout({ title, back, right = '', body, nav = true, fab = '' }) {
   const r = route().view;
-  const tab = (key, label, icon) => `<a href="#/${key}" class="${r === key || (key === 'jobs' && (r === 'job' || r === 'edit')) || (key === 'money' && r === 'overheads') ? 'on' : ''}">${icon}<span>${label}</span></a>`;
+  const tab = (key, label, icon) => `<a href="#/${key}" class="${r === key || (key === 'jobs' && (r === 'job' || r === 'edit')) || (key === 'money' && (r === 'overheads' || r === 'stats')) ? 'on' : ''}">${icon}<span>${label}</span></a>`;
   return `
   <header class="top">
     ${back ? `<button class="icon-btn" data-act="back" aria-label="Back">${ICON.back}</button>` : '<div class="brand"><img class="brand-mark" src="img/house-gold.png" alt=""><span class="wordmark">C<i>&amp;</i>B</span></div>'}
@@ -2719,6 +2719,142 @@ function sourcesCardHtml(ty, cur) {
   </section>`;
 }
 
+// ======================================================================
+// Stats: how the business is doing over a chosen period
+// ======================================================================
+const STAT_PERIODS = [['month', 'This month'], ['lastmonth', 'Last month'], ['ty', 'Tax year'], ['all', 'All time']];
+function statRange(k) {
+  const t = today(), d = parseISO(t), z = n => String(n).padStart(2, '0');
+  if (k === 'month') return [`${d.getFullYear()}-${z(d.getMonth() + 1)}-01`, t];
+  if (k === 'lastmonth') { const a = new Date(d.getFullYear(), d.getMonth() - 1, 1), b = new Date(d.getFullYear(), d.getMonth(), 0); return [toISO(a), toISO(b)]; }
+  if (k === 'ty') return [tyStart(taxYearOf(t)), t];
+  return ['2000-01-01', t];
+}
+const finDate = j => j.finished_date || j.end_date || j.start_date || String(j.created_at || '').slice(0, 10);
+function statsFor(from, to) {
+  const inR = iso => iso && iso >= from && iso <= to;
+  const fin = S.data.jobs.filter(j => j.status === 'finished' && inR(finDate(j)));
+  const cs = fin.map(j => ({ j, c: calc(j) }));
+  const rev = sum(cs.map(x => x.c.price));
+  const mats = sum(cs.map(x => x.c.totalCost));
+  const gp = rev - mats;
+  const ohs = S.data.overheads || [];
+  const amt = list => sum(list.map(o => ohInRange(o, from, to)));
+  const tools = amt(ohs.filter(o => buyKind(o) === 'tools'));
+  const stock = amt(ohs.filter(o => buyKind(o) === 'vanstock'));
+  const running = amt(ohs.filter(o => !isTool(o)));
+  const beforeTools = gp - running - stock;
+  const net = beforeTools - tools;
+  const days = sum(fin.map(j => { const sp = jobSpan(j); return sp ? daysBetween(sp[0], sp[1]) : 1; }));
+  const pays = S.data.payments.filter(p => inR(p.pay_date));
+  const decided = S.data.jobs.filter(j => j.quote_date && inR(j.quote_date) && ['active', 'finished', 'declined'].includes(j.status));
+  const wonQ = decided.filter(j => j.status !== 'declined');
+  // days from finishing to being paid in full
+  const payDays = cs.filter(x => x.c.balance <= 0.004 && x.c.price > 0).map(x => {
+    const last = paysOf(x.j.id).map(p => p.pay_date).filter(Boolean).sort().pop();
+    return last && x.j.finished_date ? Math.max(0, daysBetween(x.j.finished_date, last) - 1) : null;
+  }).filter(v => v !== null);
+  const best = cs.slice().sort((a, b) => b.c.profit - a.c.profit)[0];
+  const worst = cs.filter(x => x.c.price > 0).sort((a, b) => a.c.margin - b.c.margin)[0];
+  return { fin, cs, rev, mats, gp, running, stock, tools, beforeTools, net, days,
+    received: sum(pays.map(p => num(p.amount))), shareA: sum(cs.map(x => x.c.shareA)), shareB: sum(cs.map(x => x.c.shareB)),
+    decided: decided.length, won: wonQ.length, payDays, best, worst };
+}
+
+function statsView() {
+  const k = S.statPeriod || 'ty';
+  const [from, to] = statRange(k);
+  const st = statsFor(from, to);
+  const m = (n, neg) => `<b class="${n < 0 ? 'neg' : neg ? '' : ''}">${money(n)}</b>`;
+  const pc = (a, b) => (b ? pct(a / b) : '—');
+  const line = (label, n, sub, cls = '') => `<div class="ladder-row ${cls}"><span>${label}${sub ? `<em>${sub}</em>` : ''}</span>${m(n)}</div>`;
+  const per = (a, b) => (b ? money(a / b) : '—');
+  const label = STAT_PERIODS.find(p => p[0] === k)[1];
+  const span = k === 'all' ? 'Since you started' : `${fmtDate(from)} – ${fmtDate(to)}`;
+
+  const ladder = `<section class="card ladder">
+    <h3>Profit, step by step</h3>
+    <p class="muted small">${st.fin.length} finished job${st.fin.length === 1 ? '' : 's'} · ${span}</p>
+    ${line('Revenue', st.rev, 'what you charged, before VAT', 'first')}
+    ${line('− Materials', -st.mats, `bought for jobs · ${pc(st.mats, st.rev)} of revenue`, 'minus')}
+    ${line('Profit before overheads and tools', st.gp, `${pc(st.gp, st.rev)} margin`, 'sub')}
+    ${line('− Running costs', -st.running, 'insurance, phone, Checkatrade, fuel and other bills', 'minus')}
+    ${st.stock ? line('− Van stock', -st.stock, 'fittings and consumables kept in the van', 'minus') : ''}
+    ${line('Profit before tool purchases', st.beforeTools, `${pc(st.beforeTools, st.rev)} margin`, 'sub')}
+    ${line('− Tools and equipment', -st.tools, 'bought in this period', 'minus')}
+    ${line('Profit after all costs', st.net, `${pc(st.net, st.rev)} margin`, 'final')}
+  </section>`;
+
+  const grid = `<section class="card">
+    <h3>Per job</h3>
+    <div class="money-grid">
+      <div><span>Jobs finished</span><b>${st.fin.length}</b></div>
+      <div><span>Average job</span><b>${per(st.rev, st.fin.length)}</b></div>
+      <div><span>Average profit per job</span><b>${per(st.gp, st.fin.length)}</b><em>before overheads</em></div>
+      <div><span>Average materials per job</span><b>${per(st.mats, st.fin.length)}</b></div>
+      <div><span>Days on jobs</span><b>${st.days}</b><em>from job dates</em></div>
+      <div><span>Profit per job day</span><b>${per(st.gp, st.days)}</b><em>before overheads</em></div>
+    </div>
+    <div class="stats-best">${st.best ? `<div class="kv"><span>Best earner</span><a href="#/job/${st.best.j.id}">${esc(jobName(st.best.j))} · ${money0(st.best.c.profit)}</a></div>` : ''}
+    ${st.worst && st.cs.length > 1 ? `<div class="kv"><span>Lowest margin</span><a href="#/job/${st.worst.j.id}">${esc(jobName(st.worst.j))} · ${pct(st.worst.c.margin)}</a></div>` : ''}</div>
+  </section>`;
+
+  const owed = S.data.jobs.filter(j => j.status === 'finished').map(calc).filter(c => c.balance > 0.004);
+  const cash = `<section class="card">
+    <h3>Cash and quotes</h3>
+    <div class="money-grid">
+      <div><span>Money received</span><b>${money(st.received)}</b><em>${label.toLowerCase()}</em></div>
+      <div><span>Owed to you now</span><b class="${owed.length ? 'neg' : ''}">${money(sum(owed.map(c => c.balance)))}</b><em>${owed.length} job${owed.length === 1 ? '' : 's'}</em></div>
+      <div><span>Average wait to be paid</span><b>${st.payDays.length ? `${Math.round(sum(st.payDays) / st.payDays.length)} days` : '—'}</b><em>after finishing</em></div>
+      <div><span>Quotes won</span><b>${st.decided ? `${st.won} of ${st.decided}` : '—'}</b><em>${st.decided ? pc(st.won, st.decided) : 'no answers yet'}</em></div>
+    </div>
+    <div class="split-mini"><span>${esc(nameOf('a'))}'s share of job profit <b>${money(st.shareA)}</b></span><span>${esc(nameOf('b'))}'s share <b>${money(st.shareB)}</b></span></div>
+  </section>`;
+
+  // Work in progress and open quotes (not tied to the period)
+  const act = S.data.jobs.filter(j => j.status === 'active').map(j => ({ j, c: calc(j) }));
+  const noPrice = act.filter(x => !x.c.price).length;
+  const quotes = S.data.jobs.filter(j => j.status === 'quoted');
+  const all = statsFor('2000-01-01', today());
+  const wip = `<section class="card">
+    <h3>Coming up</h3>
+    <div class="money-grid">
+      <div><span>Jobs in progress</span><b>${act.length}</b><em>worth ${money0(sum(act.map(x => x.c.price)))}</em></div>
+      <div><span>Their profit so far</span><b>${money(sum(act.map(x => x.c.profit)))}</b><em>materials ${money0(sum(act.map(x => x.c.totalCost)))}</em></div>
+      <div><span>Quotes waiting</span><b>${quotes.length}</b><em>worth ${money0(sum(quotes.map(j => num(j.price))))}</em></div>
+      <div><span>If everything in progress finishes</span><b>${money(all.gp + sum(act.map(x => x.c.profit)))}</b><em>all-time profit before overheads and tools</em></div>
+    </div>
+    ${noPrice ? `<p class="muted small">${noPrice} job${noPrice > 1 ? 's have' : ' has'} no price yet, so ${noPrice > 1 ? 'they add' : 'it adds'} nothing here.</p>` : ''}
+  </section>`;
+
+  // Month by month (last 12 months that have anything)
+  const months = [];
+  const now = parseISO(today());
+  for (let i = 11; i >= 0; i--) {
+    const a = new Date(now.getFullYear(), now.getMonth() - i, 1), b = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+    const x = statsFor(toISO(a), toISO(b) > today() ? today() : toISO(b));
+    months.push({ lab: a.toLocaleDateString('en-GB', { month: 'short' }), rev: x.rev, gp: x.gp, net: x.net, n: x.fin.length });
+  }
+  while (months.length > 3 && !months[0].rev && !months[0].n) months.shift();
+  const top = Math.max(1, ...months.map(x => x.rev));
+  const chart = `<section class="card">
+    <h3>Month by month</h3>
+    <div class="mchart">${months.map(x => `<div class="mc-col" title="${x.lab}: revenue ${money0(x.rev)}, profit ${money0(x.gp)}">
+      <div class="mc-bars"><i class="r" style="height:${Math.round(x.rev / top * 100)}%"></i><i class="p" style="height:${Math.round(Math.max(0, x.gp) / top * 100)}%"></i></div>
+      <span>${x.lab}</span></div>`).join('')}</div>
+    <div class="legend"><span><i class="mc-r"></i>Revenue</span><span><i class="mc-p"></i>Profit before overheads</span></div>
+    <table class="src-table mc-table"><thead><tr><th></th><th>Jobs</th><th>Revenue</th><th>Profit</th><th>After all costs</th></tr></thead><tbody>
+      ${months.slice().reverse().map(x => `<tr><td>${x.lab}</td><td>${x.n}</td><td>${money0(x.rev)}</td><td>${money0(x.gp)}</td><td class="${x.net < 0 ? 'neg' : ''}">${money0(x.net)}</td></tr>`).join('')}
+    </tbody></table>
+  </section>`;
+
+  const body = `
+  <div class="chips">${STAT_PERIODS.map(([pk, pl]) => `<button class="chip ${pk === k ? 'on' : ''}" data-act="statPeriod" data-k="${pk}">${pl}</button>`).join('')}</div>
+  ${ladder}${grid}${cash}${wip}${chart}
+  <p class="muted small pad">Figures use finished jobs, dated by the day they finished. Regular bills are spread evenly over the period. Tools and van stock count on the day they were bought.</p>`;
+  return layout({ title: 'Stats', back: true, body });
+}
+
 function moneyView() {
   const jobs = S.data.jobs;
   const cur = taxYearOf(today());
@@ -2753,6 +2889,7 @@ function moneyView() {
   const won = decided.filter(j => j.status !== 'declined');
 
   const body = `
+  <a class="card home-archive stats-link" href="#/stats"><span><b>Stats</b><em>Revenue, profit at each step, per-job and month-by-month figures</em></span><span class="chev">›</span></a>
   <div class="chips">${years.map(y => `<button class="chip ${y === ty ? 'on' : ''}" data-act="taxYear" data-y="${y}">${tyLabel(y)}</button>`).join('')}</div>
   <p class="muted small pad">UK tax year 6 Apr ${ty} – 5 Apr ${ty + 1}.</p>
 
@@ -4263,6 +4400,7 @@ const ACT = {
     f.title.value = d.t;
     f.querySelectorAll('.job-types .chip').forEach(c => c.classList.toggle('on', c === el));
   },
+  statPeriod(d) { S.statPeriod = d.k; render(); },
   stripDay(d) { S.stripDay = S.stripDay === d.d ? null : d.d; render(); },
   evSheet(d) { evSheet(d.id, d.date, d.job); },
   evKind(d, el) {
