@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261121i';
-const VERSION_TAG = '20261121i';
+import { db, DEMO } from './db.js?v=20261123a';
+const VERSION_TAG = '20261123a';
 
-const APP_VERSION = '21 Nov 2026 (9)';
+const APP_VERSION = '23 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -2205,7 +2205,7 @@ function pastItems() {
 function takeDraft() {
   const d = S.newDraft || {};
   S.newDraft = null;
-  const keep = ['address', 'postcode', 'title', 'customer_name', 'customer_phone', 'customer_email', 'price', 'description', 'notes', 'start_date', 'end_date'];
+  const keep = ['address', 'postcode', 'title', 'customer_name', 'customer_phone', 'customer_email', 'price', 'description', 'notes', 'start_date', 'end_date', 'visit_date'];
   return Object.fromEntries(keep.filter(k => d[k]).map(k => [k, d[k]]));
 }
 
@@ -2334,7 +2334,7 @@ function editView({ id }) {
       <h3>Quote visit</h3>
       <p class="muted small">Going round to look and price it up? Put it in and it goes on the calendar. Leave blank if you're quoting without visiting.</p>
       <div class="two">
-        <label>Visit date<input name="visit_date" type="date" value="${esc(vis?.event_date || '')}"></label>
+        <label>Visit date<input name="visit_date" type="date" value="${esc(vis?.event_date || j.visit_date || '')}"></label>
         <label>Time<input name="visit_time" type="time" value="${esc(fmtTime(vis?.start_time))}"></label>
       </div>
       <input type="hidden" name="visit_id" value="${esc(vis?.id || '')}">
@@ -2596,6 +2596,22 @@ function calendarView() {
   ${unscheduled.length ? `<h3 class="group">Won but no dates yet</h3><div class="list">${unscheduled.map(j => `<a class="item" href="#/edit/${j.id}"><div class="row"><strong>${esc(jobName(j))}</strong><span class="btn small">Set dates</span></div><div class="small muted">${esc(jobSub(j))}</div></a>`).join('')}</div>` : ''}`;
   const fab = S.data.eventsMissing ? '' : `<button class="fab" data-act="evSheet" data-date="${sel}" aria-label="Add calendar entry">${ICON.plus}</button>`;
   return layout({ title: 'Calendar', body, fab });
+}
+
+// Tapping a date on the calendar: add a job / quote visit / entry on that day
+function dateSheet(iso) {
+  const dd = dayData(iso, deadlinesIn(iso, iso));
+  const n = dd.jobs.length + dd.events.length + dd.deadlines.length;
+  const day = parseISO(iso).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const opt = (act, icon, title, sub, extra) => `<button type="button" class="card choose" data-act="${act}" data-d="${iso}"${extra || ''}>
+      <span class="choose-icon">${icon}</span><span><strong>${title}</strong><em>${sub}</em></span></button>`;
+  openSheet(`<div class="sheet-head"><h3>${day}</h3><button type="button" class="btn small" data-act="closeSheet">Close</button></div>
+    ${n ? `<p class="muted small day-sheet-on">${n === 1 ? '1 thing' : `${n} things`} already on this day.</p>` : ''}
+    <p class="choose-lead">What do you want to add?</p>
+    ${opt('dayNew', ICON.jobs, 'A job', 'Work starting this day', ' data-kind="job"')}
+    ${opt('dayNew', ICON.doc, 'A quote visit', 'Going to look and price it up', ' data-kind="quote"')}
+    ${S.data.eventsMissing ? '' : `<button type="button" class="card choose" data-act="evSheet" data-date="${iso}"><span class="choose-icon">${ICON.cal || ICON.plus}</span><span><strong>Something else</strong><em>A reminder, appointment or day off</em></span></button>`}
+    <button type="button" class="btn block" data-act="dayLook" data-d="${iso}">${n ? 'Just show me what\'s on' : 'Nothing to add — close'}</button>`);
 }
 
 // Add / edit a calendar entry
@@ -4230,9 +4246,17 @@ const ACT = {
   calDay(d) {
     S.calDay = d.d;
     render();
-    // bring that day's details into view (stays on the calendar)
+    dateSheet(d.d);
+  },
+  dayNew(d) {
+    closeSheet();
+    S.newDraft = d.kind === 'quote' ? { visit_date: d.d } : { start_date: d.d };
+    location.hash = d.kind === 'quote' ? '#/edit/new-quote' : '#/edit/new-job';
+  },
+  dayLook(d) {
+    closeSheet();
     const el = document.querySelector('.cal-day');
-    if (el && el.getBoundingClientRect().top > window.innerHeight - 160) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   },
   jobType(d, el) {
     const f = el.closest('form');
