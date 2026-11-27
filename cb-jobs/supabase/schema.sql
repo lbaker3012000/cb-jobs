@@ -418,3 +418,7 @@ create index if not exists mileage_date_idx on public.mileage (trip_date);
 alter table public.mileage enable row level security;
 drop policy if exists "members only" on public.mileage;
 create policy "members only" on public.mileage for all to authenticated using (public.is_member()) with check (public.is_member());
+
+-- Invoice sent tracking (Nov 2026)
+alter table public.jobs add column if not exists invoice_sent_at date;
+alter table public.docs add column if not exists sent_at timestamptz;

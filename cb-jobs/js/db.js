@@ -1,5 +1,5 @@
 // Data layer: Supabase when configured, otherwise a local demo store.
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261123c';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20261127a';
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 const TABLES = ['jobs', 'costs', 'payments', 'photos'];

@@ -1,7 +1,7 @@
-import { db, DEMO } from './db.js?v=20261123c';
-const VERSION_TAG = '20261123c';
+import { db, DEMO } from './db.js?v=20261127a';
+const VERSION_TAG = '20261127a';
 
-const APP_VERSION = '23 Nov 2026 (3)';
+const APP_VERSION = '27 Nov 2026';
 
 // ======================================================================
 // State & helpers
@@ -209,6 +209,12 @@ const jobById = id => S.data.jobs.find(j => j.id === id);
 const jobAddr = j => String(j.address || '').split('\n').map(x => x.trim()).filter(Boolean).join(', ');
 const jobName = j => jobAddr(j) || j.title || 'Job';
 const jobSub = j => [j.customer_name, jobAddr(j) ? j.title : null].filter(Boolean).join(' · ');
+// Customer name as a tap-through to their profile (works inside cards that are links themselves)
+const nameLink = (name, attrs) => (name ? `<span class="name-link" role="link" tabindex="0" data-act="openProfile" ${attrs}>${esc(name)}</span>` : '');
+const jobNameLink = j => nameLink(j.customer_name, `data-id="${j.id}"`);
+const jobSubHtml = j => [jobNameLink(j), jobAddr(j) && j.title ? esc(j.title) : ''].filter(Boolean).join(' · ');
+// Has the invoice gone out? (marked by hand, or when the PDF was shared from Quotes)
+const invSent = j => j.invoice_sent_at || null;
 const JOB_TYPES = ['Bathroom install', 'Boiler swap', 'Boiler service', 'AC install', 'AC service', 'Leak repair', 'Dishwasher waste', 'Radiator swap', 'Tap / toilet repair', 'General building'];
 const daysSince = iso => (iso ? Math.round((parseISO(today()) - parseISO(iso.slice(0, 10))) / 86400000) : null);
 // When a quote/invoice was last chased (so the To do list moves on)
@@ -250,8 +256,10 @@ function todos() {
     } else if (j.status === 'finished') {
       if (c.balance > 0.004) {
         const chased = getMark(j, 'chased_at');
-        if (!chased || chased < (j.finished_date || '')) add(j, 1, '£', 'Send invoice', `${money(c.balance)} to collect`, 'invoice_send', `<a class="btn small" href="#/quotes/job-invoice/${j.id}">Invoice</a>`);
-        else if (daysSince(chased) >= num(st.payment_chase_days)) add(j, 1, '£', 'Payment overdue', `${money(c.balance)} · finished ${daysSince(j.finished_date)} days ago`, 'payment', `<button class="btn small" data-act="paidFull" data-id="${j.id}">Paid</button>`);
+        const sentOn = invSent(j);
+        const last = [sentOn, chased].filter(Boolean).sort().pop();
+        if (!sentOn) add(j, 1, '£', 'Send invoice', `${money(c.balance)} to collect`, 'invoice_send', `<a class="btn small" href="#/quotes/job-invoice/${j.id}">Invoice</a><button class="btn small" data-act="invSent" data-id="${j.id}">Sent</button>`);
+        else if (daysSince(last) >= num(st.payment_chase_days)) add(j, 1, '£', 'Payment overdue', `${money(c.balance)} · finished ${daysSince(j.finished_date)} days ago`, 'payment', `<button class="btn small" data-act="paidFull" data-id="${j.id}">Paid</button>`);
       }
     }
   }
@@ -863,7 +871,7 @@ function inboxBannerHtml() {
 
 // Turning an approved proposal into real records
 const ALLOW = {
-  jobs: ['title', 'status', 'customer_name', 'customer_phone', 'customer_email', 'address', 'postcode', 'description', 'notes', 'price', 'vat_applies', 'vat_rate', 'who', 'quote_date', 'start_date', 'end_date', 'finished_date', 'source', 'guarantee_until', 'guarantee_note', 'service_due'],
+  jobs: ['title', 'status', 'customer_name', 'customer_phone', 'customer_email', 'address', 'postcode', 'description', 'notes', 'price', 'vat_applies', 'vat_rate', 'who', 'quote_date', 'start_date', 'end_date', 'finished_date', 'source', 'guarantee_until', 'guarantee_note', 'service_due', 'invoice_sent_at'],
   costs: ['description', 'category', 'qty', 'unit_cost', 'supplier', 'paid_by', 'cost_date'],
   payments: ['pay_date', 'amount', 'kind', 'method', 'received_by', 'note'],
   overheads: ['name', 'category', 'amount', 'frequency', 'paid_by', 'start_date', 'end_date', 'notes'],
@@ -1193,6 +1201,19 @@ function qRefreshCats() {
   if (el) { el.innerHTML = qCatsHtml(qDraft()); el.querySelectorAll('textarea').forEach(growChat); }
 }
 
+// Record that a quote/invoice went out (and, for invoices, tick the job off too)
+async function markDocSent(rec, on) {
+  await saveRow('docs', rec.id, { sent_at: on ? new Date().toISOString() : null });
+  const j = rec.job_id ? jobById(rec.job_id) : null;
+  if (j && rec.doc_type === 'invoice') {
+    if (on && !j.invoice_sent_at) await saveRow('jobs', j.id, { invoice_sent_at: today() });
+    if (!on && j.invoice_sent_at) {
+      const other = qDocs().some(x => x.id !== rec.id && x.job_id === j.id && x.doc_type === 'invoice' && x.sent_at);
+      if (!other) await saveRow('jobs', j.id, { invoice_sent_at: null });
+    }
+  }
+}
+
 function qDocView(id) {
   const rec = qDocs().find(x => x.id === id);
   if (!rec) return layout({ title: 'Quotes', back: true, body: '<div class="empty">Not found — it may have been deleted.</div>' });
@@ -1207,7 +1228,9 @@ function qDocView(id) {
     <button class="btn small" data-act="print">Print</button>
     <button class="btn small primary" data-act="qSend" data-id="${rec.id}">Send PDF</button>
   </div>
-  <div class="q-meta muted small">${esc(Q_PROFILES[rec.profile]?.label || '')} ${isQuote ? 'quote' : 'invoice'} *${rec.number}${j ? ` · <a href="#/job/${j.id}">${esc(jobName(j))}</a>` : ''}</div>
+  <div class="q-meta muted small">${esc(Q_PROFILES[rec.profile]?.label || '')} ${isQuote ? 'quote' : 'invoice'} *${rec.number}${rec.customer?.name ? ` · ${nameLink(rec.customer.name, `data-doc="${rec.id}"`)}` : ''}${j ? ` · <a href="#/job/${j.id}">${esc(jobName(j))}</a>` : ''}</div>
+  <div class="q-sent ${rec.sent_at ? 'is-sent' : 'not-sent'}">${rec.sent_at ? `<span>✓ <b>Sent ${fmtDate(String(rec.sent_at).slice(0, 10))}</b></span><button class="btn small" data-act="docSent" data-id="${rec.id}" data-undo="1">Undo</button>`
+    : `<span><b>Not sent yet</b> — "Send PDF" ticks this off for you</span><button class="btn small" data-act="docSent" data-id="${rec.id}">Mark as sent</button>`}</div>
   ${qPaperHtml(rec)}
   <div class="q-after">
     ${isQuote ? (inv ? `<a class="btn wide" href="#/quotes/view/${inv.id}">Open invoice *${inv.number}</a>` : `<button class="btn primary wide" data-act="qConvert" data-id="${rec.id}">Job done — turn into an invoice →</button>`) : ''}
@@ -1220,7 +1243,7 @@ function qDocView(id) {
 function qSavedList() {
   const q = String(S.qSavedQ || '').toLowerCase().trim();
   const f = S.qSavedF || 'all';
-  return qDocs().filter(d => (f === 'all' || d.profile === f || d.doc_type === f))
+  return qDocs().filter(d => (f === 'all' || d.profile === f || d.doc_type === f || (f === 'unsent' && !d.sent_at)))
     .filter(d => !q || [d.customer?.name, d.customer?.addr1, d.customer?.town, d.customer?.postcode, String(d.number)].join(' ').toLowerCase().includes(q))
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
 }
@@ -1231,13 +1254,13 @@ function qSavedView() {
   const body = `
   ${qSubNav('saved')}
   <input type="search" class="q-search" placeholder="Search name, address or number" value="${esc(S.qSavedQ || '')}" data-input="qSavedQ">
-  <div class="chips">${chip('all', 'All')}${chip('quote', 'Quotes')}${chip('invoice', 'Invoices')}${chip('cb', 'C&B')}${chip('htp', 'Henry The Plumber')}</div>
+  <div class="chips">${chip('all', 'All')}${chip('quote', 'Quotes')}${chip('invoice', 'Invoices')}${chip('unsent', 'Not sent')}${chip('cb', 'C&B')}${chip('htp', 'Henry The Plumber')}</div>
   <section class="card q-saved" id="q-saved-list">${qSavedRows(list)}</section>`;
   return layout({ title: 'Saved quotes & invoices', body });
 }
 function qSavedRows(list) {
   return list.map(d => `<a class="q-row" href="#/quotes/view/${d.id}">
-      <div><b>${esc(d.customer?.name || 'No name')}</b><span class="q-tag ${d.doc_type}">${d.doc_type === 'quote' ? 'Quote' : 'Invoice'}</span>
+      <div>${d.customer?.name ? `<b>${nameLink(d.customer.name, `data-doc="${d.id}"`)}</b>` : '<b>No name</b>'}<span class="q-tag ${d.doc_type}">${d.doc_type === 'quote' ? 'Quote' : 'Invoice'}</span><span class="q-tag ${d.sent_at ? 'sent' : 'unsent'}">${d.sent_at ? `Sent ${fmtShort(String(d.sent_at).slice(0, 10))}` : 'Not sent'}</span>
         <div class="muted small">*${d.number} · ${esc(Q_PROFILES[d.profile]?.short || '')} · ${fmtDate(d.doc_date)}${d.customer?.addr1 ? ` · ${esc(d.customer.addr1)}` : ''}</div></div>
       <b class="num">${qMoney(d.total)}</b></a>`).join('') || '<p class="muted small">Nothing saved yet.</p>';
 }
@@ -1774,7 +1797,7 @@ function todoHtml() {
       <span class="ti-icon p${t.pri}">${t.icon}</span>
       <div class="ti-main">
         ${t.backup ? `<b>${t.text}</b>` : `<a href="#/job/${t.j.id}"><b>${t.text}</b> · ${esc(jobName(t.j))}</a>`}
-        <div class="muted small">${t.backup ? t.sub : `${esc(jobSub(t.j))}${t.sub ? ` · ${t.sub}` : ''}`}</div>
+        <div class="muted small">${t.backup ? t.sub : `${jobSubHtml(t.j)}${t.sub ? ` · ${t.sub}` : ''}`}</div>
         <div class="ti-actions">
           ${t.backup ? '<button class="btn small primary" data-act="export" data-what="backup">Download</button>' : ''}
           ${t.tpl && t.j.customer_phone ? `<a class="btn small primary" href="tel:${esc(String(t.j.customer_phone).replace(/[^\d+]/g, ''))}">${ICON.phone} Call</a>` : ''}
@@ -1928,11 +1951,11 @@ function jobCard(j) {
       : `<b class="neg">Quote not sent yet</b>${c.gross ? ` · ${money0(c.gross)}` : ''}`;
   }
   else if (j.status === 'active') line = `${dates ? `<b>${dates}</b> · ` : '<b class="neg">No dates</b> · '}${c.balance > 0.004 ? `${money0(c.balance)} to collect` : 'paid'}`;
-  else if (j.status === 'finished') line = c.balance > 0.004 ? `<b class="neg">Owed ${money(c.balance)}</b>` : `Paid · profit <b class="${c.profit < 0 ? 'neg' : 'pos'}">${money0(c.profit)}</b>`;
+  else if (j.status === 'finished') line = c.balance > 0.004 ? `<b class="neg">Owed ${money(c.balance)}</b> · ${invSent(j) ? `invoice sent ${fmtShort(invSent(j))}` : '<b class="neg">invoice not sent</b>'}` : `Paid · profit <b class="${c.profit < 0 ? 'neg' : 'pos'}">${money0(c.profit)}</b>`;
   else line = `Declined · ${money0(c.gross)}`;
   return `<a class="card job ${j.status}" href="#/job/${j.id}">
     <div class="row"><strong>${esc(jobName(j))}</strong>${pill(j.status)}</div>
-    <div class="job-who">${esc(jobSub(j) || 'No customer')}</div>
+    <div class="job-who">${jobSubHtml(j) || 'No customer'}</div>
     <div class="job-line">${line}</div>
   </a>`;
 }
@@ -1949,7 +1972,7 @@ function jobView({ id }) {
   const body = `
     <section class="hero">
       <div class="row"><h2>${esc(jobName(j))}</h2>${pill(j.status)}</div>
-      <div class="hero-who">${esc(jobSub(j) || 'No customer')}${jobAddr(j) && j.postcode ? ` · ${esc(j.postcode)}` : ''}</div>
+      <div class="hero-who">${jobSubHtml(j) || 'No customer'}${jobAddr(j) && j.postcode ? ` · ${esc(j.postcode)}` : ''}</div>
       ${(() => { const cp = j.customer_name || j.customer_phone ? contactList().find(x => x.jobs.some(y => y.id === j.id)) : null;
         return cp ? `<a class="hero-profile" href="#/contacts/${encodeURIComponent(cp.key)}">${ICON.people} ${esc(cp.name)}'s profile${cp.jobs.length > 1 ? ` · ${cp.jobs.length} jobs` : ''} ›</a>` : ''; })()}
       <div class="quick">
@@ -2004,6 +2027,20 @@ function statusActions(j) {
   return `${j.status === 'declined' ? '<div class="note">This quote was declined. It\'s kept in the Archive.</div>' : stepper}<div class="btn-row">${btns}</div>`;
 }
 
+function invoiceCardHtml(j, c) {
+  if (j.status !== 'finished' && j.status !== 'active') return '';
+  const docs = qDocs().filter(d => d.job_id === j.id && d.doc_type === 'invoice').sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const sent = invSent(j);
+  if (j.status === 'active' && !sent && !docs.length) return '';
+  return `<section class="card inv-status ${sent ? 'is-sent' : 'not-sent'}">
+    <div class="inv-row"><span class="inv-ico">${sent ? '✓' : '✉'}</span>
+      <div class="ac-main">${sent ? `<b>Invoice sent ${fmtDate(sent)}</b>` : '<b>Invoice not sent yet</b>'}
+        ${docs.length ? `<div class="muted small">${docs.map(d => `<a href="#/quotes/view/${d.id}">Invoice *${d.number}</a>`).join(', ')}</div>` : `<div class="muted small">${sent ? 'Sent outside the app' : 'Make one, or tick it off if you sent it another way'}</div>`}</div>
+      ${sent ? `<button class="btn small" data-act="invSent" data-id="${j.id}" data-undo="1">Undo</button>`
+        : `${docs.length ? '' : `<a class="btn small" href="#/quotes/job-invoice/${j.id}">Make invoice</a>`}<button class="btn small primary" data-act="invSent" data-id="${j.id}">Mark as sent</button>`}</div>
+  </section>`;
+}
+
 function overviewTab(j, c) {
   const quoted = j.status === 'quoted';
   const paidPct = c.gross > 0 ? Math.min(100, Math.max(0, (c.paid / c.gross) * 100)) : 0;
@@ -2027,6 +2064,7 @@ function overviewTab(j, c) {
     <div class="paybar"><i style="width:${paidPct}%"></i></div>
     <div class="row small paybar-label"><span>Paid ${money(c.paid)}</span><b class="${c.balance > 0.004 ? 'neg' : 'pos'}">${c.balance > 0.004 ? `${money(c.balance)} to collect` : c.balance < -0.004 ? `Overpaid ${money(-c.balance)}` : 'Paid in full'}</b></div>`}
   </section>
+  ${invoiceCardHtml(j, c)}
 
   ${photosTab(j)}
   ${costsTab(j, c)}
@@ -2045,7 +2083,7 @@ function overviewTab(j, c) {
     ${j.finished_date ? `<div class="kv"><span>Finished</span><b>${fmtDate(j.finished_date)}</b></div>` : ''}
     ${j.description ? `<h4>Scope of works</h4><p>${nl2br(j.description)}</p>` : ''}
     ${j.notes ? `<h4>Notes (just you two)</h4><p class="notes">${nl2br(j.notes)}</p>` : ''}
-    ${others.length ? `<h4>Other jobs for ${esc(j.customer_name)}</h4>${others.map(o => `<a class="kv link" href="#/job/${o.id}"><span>${esc(jobName(o))}${jobAddr(o) ? ` <em class="muted">${esc(o.title || '')}</em>` : ''}</span><b>${pill(o.status)}</b></a>`).join('')}` : ''}
+    ${others.length ? `<h4>Other jobs for ${jobNameLink(j)}</h4>${others.map(o => `<a class="kv link" href="#/job/${o.id}"><span>${esc(jobName(o))}${jobAddr(o) ? ` <em class="muted">${esc(o.title || '')}</em>` : ''}</span><b>${pill(o.status)}</b></a>`).join('')}` : ''}
   </section>
 
   ${aftercareHtml(j)}
@@ -2476,7 +2514,7 @@ function dayItemsHtml(iso, dd, compactEmpty = true) {
     rows.push(`<div class="cal-item job ${j.status}">
       <a href="#/job/${j.id}" class="ci-main">
         <b>${esc(jobName(j))}</b>
-        <div class="muted small">${esc(jobSub(j))}${j.status === 'quoted' ? ' · <i>pencilled in</i>' : ''}</div>
+        <div class="muted small">${jobSubHtml(j)}${j.status === 'quoted' ? ' · <i>pencilled in</i>' : ''}</div>
       </a>
       ${iso === t && j.customer_phone ? `<a class="btn small" href="tel:${esc(String(j.customer_phone).replace(/[^\d+]/g, ''))}" aria-label="Call ${esc(j.customer_name || 'customer')}">${ICON.phone}</a>` : ''}
       ${addr && iso >= t && j.status !== 'finished' ? `<a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}" target="_blank" rel="noopener" aria-label="Directions">${ICON.pin}</a>` : ''}
@@ -2593,7 +2631,7 @@ function calendarView() {
       ${S.data.eventsMissing ? '' : `<button class="add-day" data-act="evSheet" data-date="${sel}" aria-label="Add entry">+</button>`}</div>
     ${dayItemsHtml(sel, dayData(sel, dl))}
   </section>
-  ${unscheduled.length ? `<h3 class="group">Won but no dates yet</h3><div class="list">${unscheduled.map(j => `<a class="item" href="#/edit/${j.id}"><div class="row"><strong>${esc(jobName(j))}</strong><span class="btn small">Set dates</span></div><div class="small muted">${esc(jobSub(j))}</div></a>`).join('')}</div>` : ''}`;
+  ${unscheduled.length ? `<h3 class="group">Won but no dates yet</h3><div class="list">${unscheduled.map(j => `<a class="item" href="#/edit/${j.id}"><div class="row"><strong>${esc(jobName(j))}</strong><span class="btn small">Set dates</span></div><div class="small muted">${jobSubHtml(j)}</div></a>`).join('')}</div>` : ''}`;
   const fab = S.data.eventsMissing ? '' : `<button class="fab" data-act="evSheet" data-date="${sel}" aria-label="Add calendar entry">${ICON.plus}</button>`;
   return layout({ title: 'Calendar', body, fab });
 }
@@ -2927,7 +2965,7 @@ function moneyView() {
 
   <section class="card">
     <h3>Waiting on payment</h3>
-    ${owed.length ? owed.map(j => { const c = calc(j); return `<a class="kv link" href="#/job/${j.id}"><span>${esc(jobName(j))} <em class="muted">${esc(jobSub(j))}</em></span><b class="neg">${money(c.balance)}</b></a>`; }).join('') : '<p class="muted small">Nobody owes you anything.</p>'}
+    ${owed.length ? owed.map(j => { const c = calc(j); return `<a class="kv link" href="#/job/${j.id}"><span>${esc(jobName(j))} <em class="muted">${jobSubHtml(j)} · ${invSent(j) ? `invoice sent ${fmtShort(invSent(j))}` : 'invoice not sent'}</em></span><b class="neg">${money(c.balance)}</b></a>`; }).join('') : '<p class="muted small">Nobody owes you anything.</p>'}
   </section>
 
   ${sourcesCardHtml(ty, cur)}
@@ -4232,13 +4270,14 @@ const ACT = {
     const text = `${biz} ${isQuote ? 'quote' : 'invoice'} ${rec.number}`;
     const j = rec.job_id ? jobById(rec.job_id) : null;
     const mark = async () => {
+      await markDocSent(rec, true).catch(console.error);
       if (!j) return;
       if (isQuote && !j.quote_date && isPre(j)) await saveRow('jobs', j.id, { quote_date: today(), status: 'quoted' }).catch(console.error);
       if (!isQuote) await setMark(j, 'chased_at').catch(console.error);
     };
     if (S.readyPdf && S.readyPdf.key === `doc/${rec.id}`) {
       const file = S.readyPdf.file; S.readyPdf = null; el.textContent = 'Send PDF';
-      try { await navigator.share({ files: [file], title: file.name, text }); await mark(); }
+      try { await navigator.share({ files: [file], title: file.name, text }); await mark(); render(); }
       catch (e) { if (e.name !== 'AbortError') { saveFile(file); toast('PDF downloaded instead'); } }
       return;
     }
@@ -4253,8 +4292,8 @@ const ACT = {
           if (e.name === 'NotAllowedError') { S.readyPdf = { key: `doc/${rec.id}`, file }; setTimeout(() => { el.textContent = 'PDF ready — tap to send'; el.classList.add('pulse'); }, 0); return; }
           throw e;
         }
-      } else { saveFile(file); toast('PDF downloaded'); }
-      await mark();
+      } else { saveFile(file); toast('PDF downloaded and marked as sent'); }
+      await mark(); render();
     });
     if (!S.readyPdf) el.textContent = label;
   },
@@ -4411,6 +4450,31 @@ const ACT = {
     const f = el.closest('form');
     f.title.value = d.t;
     f.querySelectorAll('.job-types .chip').forEach(c => c.classList.toggle('on', c === el));
+  },
+  openProfile(d) {
+    const all = contactList();
+    let c = null;
+    if (d.id) c = all.find(x => x.jobs.some(y => y.id === d.id));
+    if (!c && d.doc) {
+      const rec = qDocs().find(x => x.id === d.doc);
+      if (rec?.job_id) c = all.find(x => x.jobs.some(y => y.id === rec.job_id));
+      const nm = String(rec?.customer?.name || '').trim().toLowerCase();
+      if (!c && nm) c = all.find(x => String(x.name || '').trim().toLowerCase() === nm);
+    }
+    if (c) go(`#/contacts/${encodeURIComponent(c.key)}`);
+    else toast('No profile for this name yet');
+  },
+  async invSent(d) {
+    const j = jobById(d.id); if (!j) return;
+    await saveRow('jobs', j.id, { invoice_sent_at: d.undo ? null : today() });
+    toast(d.undo ? 'Marked as not sent' : 'Invoice marked as sent');
+    render();
+  },
+  async docSent(d) {
+    const rec = qDocs().find(x => x.id === d.id); if (!rec) return;
+    await markDocSent(rec, !d.undo);
+    toast(d.undo ? 'Marked as not sent' : 'Marked as sent');
+    render();
   },
   statPeriod(d) { S.statPeriod = d.k; render(); },
   stripDay(d) { S.stripDay = S.stripDay === d.d ? null : d.d; render(); },

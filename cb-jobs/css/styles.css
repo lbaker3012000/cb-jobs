@@ -1335,3 +1335,30 @@ html[data-theme="dark"] .mc-bars i.r, html[data-theme="dark"] .legend i.mc-r { b
 .mchart.weeks .mc-col span { font-size: .68rem; white-space: nowrap; }
 .mchart.weeks.many .mc-col span { font-size: .6rem; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; margin-top: 4px; }
 .mchart.weeks { height: 170px; }
+
+/* ===== Names link to profiles; invoice sent status ===== */
+.name-link { color: var(--acc); font-weight: 700; cursor: pointer; }
+.name-link:hover { text-decoration: underline; }
+.hero .name-link { color: inherit; border-bottom: 2px solid var(--gold); }
+html[data-theme="dark"] .hero .name-link { color: inherit; }
+.inv-status .inv-row { display: flex; align-items: center; gap: 12px; }
+.inv-status .inv-row .btn { flex: none; }
+.inv-ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; flex: none; background: var(--soft); }
+.inv-status.is-sent .inv-ico { background: #2f7d4f; color: #fff; }
+.inv-status.not-sent { border-left: 4px solid #c0392b; }
+.q-sent { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; margin: 0 0 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-size: .92rem; }
+.q-sent.is-sent b { color: #2f7d4f; }
+html[data-theme="dark"] .q-sent.is-sent b { color: #7fd49d; }
+.q-sent.not-sent { border-left: 4px solid #c0392b; }
+.q-tag.sent { background: #dff1e5; color: #1f5e37; }
+.q-tag.unsent { background: #f8e0dc; color: #8a2a1d; }
+html[data-theme="dark"] .q-tag.sent { background: #1f4a31; color: #bfe8cd; }
+html[data-theme="dark"] .q-tag.unsent { background: #4a2420; color: #f3c3bb; }
+.q-row .q-tag + .q-tag { margin-left: 4px; }
+/* keep header buttons as they were (reading-comfort tints must not reach the banner) */
+.top .btn, html[data-theme="dark"] .top .btn { background-color: rgba(247,243,236,.12); color: var(--cream); }
+.top .btn:not(.primary):not(.danger), html[data-theme="dark"] .top .btn:not(.primary):not(.danger) { background-color: rgba(247,243,236,.12); color: var(--cream); }
+/* links that sit on their own coloured buttons keep their own text colour */
+main .quick a, html[data-theme="dark"] main .quick a { color: var(--cream); }
+main .ti-main a, html[data-theme="dark"] main .ti-main a { color: inherit; }
+main .q-subnav a:not(.on), html[data-theme="dark"] main .q-subnav a:not(.on) { color: var(--muted); font-weight: 600; }
